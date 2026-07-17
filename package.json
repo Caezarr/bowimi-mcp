@@ -1,0 +1,17 @@
+{
+  "name": "bowimi-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for Bowimi field sales CRM",
+  "type": "module",
+  "bin": {
+    "bowimi-mcp": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.22.0"
+  }
+}
