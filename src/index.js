@@ -5,7 +5,7 @@ import { z } from "zod";
 import { BowimiAuth } from "./auth.js";
 import { BowimiClient } from "./client.js";
 
-const LOCAL_VERSION = "1.3.0";
+const LOCAL_VERSION = "1.4.0";
 const GITHUB_PKG_URL =
   "https://raw.githubusercontent.com/Caezarr/bowimi-mcp/main/package.json";
 
@@ -1105,6 +1105,252 @@ Use this for a weekly overview before a team meeting or to send a summary.`,
     };
 
     return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
+  }
+);
+
+// ── Survey & Activity ─────────────────────────────────────────────────────
+
+server.tool(
+  "get_activity",
+  `Get raw activity feed. Returns visits, survey responses, orders or tasks logged in Bowimi.
+
+Filter options (all optional):
+- type: "all" | "survey" | "order" | "task" (default "all")
+- entityUuid: filter by location
+- userUuid: filter by rep
+- from / to: ISO date strings (e.g. "2026-07-01")
+- snowDay: pagination cursor — pass the last snowDay value from a previous call to get older records
+- limit: max records to return (default 50, max 200)
+
+Each record has: activityId, date, snowDay, userUuid, entityUuid, details._type, and for surveys: details.responseUuid, details.surveyName.`,
+  {
+    type: z.enum(["all", "survey", "order", "task"]).default("all"),
+    entityUuid: z.string().optional(),
+    userUuid: z.string().optional(),
+    from: z.string().optional().describe("ISO date e.g. 2026-07-01"),
+    to: z.string().optional().describe("ISO date e.g. 2026-07-31"),
+    snowDay: z.string().optional().describe("Pagination cursor from previous call"),
+    limit: z.number().int().min(1).max(200).default(50),
+  },
+  async ({ type, entityUuid, userUuid, from, to, snowDay, limit }) => {
+    const filter = { _type: type };
+    if (entityUuid) filter.entityUuid = entityUuid;
+    if (userUuid) filter.userUuid = userUuid;
+    if (from) filter.from = from;
+    if (to) filter.to = to;
+    if (snowDay) filter.snowDay = snowDay;
+    filter.limit = limit;
+
+    const data = await client.getActivity(filter);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_survey",
+  "Get survey definition with all questions (text, type, choices). Use to map questionUuid → question text when reading survey responses.",
+  {
+    surveyUuid: z.string().describe("Survey UUID"),
+  },
+  async ({ surveyUuid }) => {
+    const data = await client.getSurvey(surveyUuid);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_survey_response",
+  "Get full survey response for one visit, including all question answers. Pass a responseUuid from get_activity (details.responseUuid).",
+  {
+    responseUuid: z.string().describe("Response UUID from activity feed (details.responseUuid)"),
+  },
+  async ({ responseUuid }) => {
+    const data = await client.getVisitFromResponse(responseUuid);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_introductions",
+  `Count product introductions from survey responses.
+
+An "introduction" = a survey answer mentioning one or more product references (not "None").
+The tool fetches survey activity for the given period, enriches each response with question/answer details, then aggregates counts by rep, location, and product reference.
+
+Returns:
+- summary: total introductions, unique locations, unique reps
+- by_rep: [{userUuid, repName, count}]
+- by_location: [{entityUuid, locationName, count}]
+- by_product: [{product, count}]
+- details: [{date, repName, locationName, surveyName, products_introduced}]
+
+Parameters:
+- from / to: ISO date range (required)
+- userUuid: filter to one rep (optional)
+- entityUuid: filter to one location (optional)
+- introductionKeywords: keywords to identify "introduction" questions (default: ["introduc", "new product", "nouveau", "nieuw", "geïntroduceerd"])`,
+  {
+    from: z.string().describe("Start date ISO e.g. 2026-07-01"),
+    to: z.string().describe("End date ISO e.g. 2026-07-31"),
+    userUuid: z.string().optional(),
+    entityUuid: z.string().optional(),
+    introductionKeywords: z.array(z.string()).default(["introduc", "new product", "nouveau", "nieuw", "geïntroduceerd"]),
+  },
+  async ({ from, to, userUuid, entityUuid, introductionKeywords }) => {
+    // Step 1: fetch all survey activity in range
+    const filter = { _type: "survey", from, to };
+    if (userUuid) filter.userUuid = userUuid;
+    if (entityUuid) filter.entityUuid = entityUuid;
+    filter.limit = 200;
+
+    let activities = await client.getActivity(filter);
+    if (!Array.isArray(activities)) {
+      activities = activities?.items || activities?.data || [];
+    }
+
+    const surveyActivities = activities.filter(a => a.details?.responseUuid);
+
+    if (surveyActivities.length === 0) {
+      return { content: [{ type: "text", text: JSON.stringify({ summary: { total_introductions: 0, message: "No survey responses found for this period" } }, null, 2) }] };
+    }
+
+    // Step 2: fetch user list for name lookup
+    let users = [];
+    try { users = await client.listUsers(); } catch {}
+    const userMap = {};
+    for (const u of (Array.isArray(users) ? users : [])) {
+      userMap[u.userUuid || u.uuid] = u.name || u.displayName || u.email || u.userUuid;
+    }
+
+    // Step 3: fetch survey definitions (cached by surveyUuid)
+    const surveyCache = {};
+    const getSurveyDef = async (surveyUuid) => {
+      if (!surveyUuid) return null;
+      if (!surveyCache[surveyUuid]) {
+        try { surveyCache[surveyUuid] = await client.getSurvey(surveyUuid); } catch { surveyCache[surveyUuid] = null; }
+      }
+      return surveyCache[surveyUuid];
+    };
+
+    // Step 4: fetch entity names for locations
+    const entityUuids = [...new Set(surveyActivities.map(a => a.entityUuid).filter(Boolean))];
+    let entityMap = {};
+    try {
+      const entities = await client.getEntities(entityUuids);
+      for (const e of (Array.isArray(entities) ? entities : [])) {
+        entityMap[e.entityUuid || e.uuid] = e.name || e.entityUuid;
+      }
+    } catch {}
+
+    // Step 5: for each activity, fetch response and identify introductions
+    const details = [];
+    const byRep = {};
+    const byLocation = {};
+    const byProduct = {};
+
+    for (const act of surveyActivities) {
+      let visit;
+      try { visit = await client.getVisitFromResponse(act.details.responseUuid); } catch { continue; }
+
+      const surveyUuid = visit.surveys?.[0]?.surveyUuid;
+      const surveyDef = await getSurveyDef(surveyUuid);
+      const questionMap = {};
+      for (const q of (surveyDef?.questions || [])) {
+        questionMap[q.questionUuid] = q.text;
+      }
+
+      // Find introduction questions by keyword match on question text
+      const kws = introductionKeywords.map(k => k.toLowerCase());
+      const introductionQuestionUuids = new Set(
+        Object.entries(questionMap)
+          .filter(([, text]) => kws.some(kw => text.toLowerCase().includes(kw)))
+          .map(([uuid]) => uuid)
+      );
+
+      // Collect introduced products from those questions
+      const introducedProducts = [];
+      for (const survey of (visit.surveys || [])) {
+        for (const [qUuid, answer] of Object.entries(survey.answers || {})) {
+          if (!introductionQuestionUuids.has(qUuid)) continue;
+          const vals = Array.isArray(answer.value) ? answer.value : [answer.value];
+          const nonNone = vals.filter(v => v && String(v).toLowerCase() !== "none" && String(v).trim() !== "");
+          introducedProducts.push(...nonNone);
+        }
+      }
+
+      if (introducedProducts.length === 0) continue;
+
+      const repUuid = act.userUuid;
+      const locUuid = act.entityUuid;
+      const repName = userMap[repUuid] || repUuid;
+      const locName = entityMap[locUuid] || locUuid;
+      const surveyName = act.details?.surveyName || visit.name || "Unknown survey";
+
+      details.push({
+        date: act.date,
+        repName,
+        locationName: locName,
+        surveyName,
+        products_introduced: introducedProducts,
+      });
+
+      // Aggregate
+      if (!byRep[repUuid]) byRep[repUuid] = { userUuid: repUuid, repName, count: 0 };
+      byRep[repUuid].count += introducedProducts.length;
+
+      if (!byLocation[locUuid]) byLocation[locUuid] = { entityUuid: locUuid, locationName: locName, count: 0 };
+      byLocation[locUuid].count += introducedProducts.length;
+
+      for (const p of introducedProducts) {
+        byProduct[p] = (byProduct[p] || 0) + 1;
+      }
+    }
+
+    const totalIntroductions = Object.values(byProduct).reduce((s, c) => s + c, 0);
+
+    const result = {
+      summary: {
+        period: { from, to },
+        total_introductions: totalIntroductions,
+        unique_locations: Object.keys(byLocation).length,
+        unique_reps: Object.keys(byRep).length,
+        responses_analyzed: surveyActivities.length,
+      },
+      by_rep: Object.values(byRep).sort((a, b) => b.count - a.count),
+      by_location: Object.values(byLocation).sort((a, b) => b.count - a.count),
+      by_product: Object.entries(byProduct).map(([product, count]) => ({ product, count })).sort((a, b) => b.count - a.count),
+      details: details.sort((a, b) => b.date.localeCompare(a.date)),
+    };
+
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// ── Debug (temp) ───────────────────────────────────────────────────────────
+
+server.tool(
+  "debug_api",
+  "Probe a raw Bowimi API endpoint for exploration. method: GET|POST|QUERY|LIST|PATCH. path: e.g. 'entity-visit'. body: optional JSON string.",
+  {
+    method: z.string().default("GET"),
+    path: z.string(),
+    body: z.string().optional(),
+    params: z.record(z.string()).optional(),
+  },
+  async ({ method, path, body, params }) => {
+    const base = `${auth.apiBase}/${client.version}`;
+    const url = new URL(`${base}/${path}`);
+    if (params) for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    const opts = { method: method.toUpperCase() };
+    if (body) opts.body = body;
+    let res;
+    try {
+      res = await auth.fetch(url.toString(), opts);
+    } catch (e) {
+      return { content: [{ type: "text", text: `Fetch error: ${e.message}` }] };
+    }
+    const text = await res.text();
+    return { content: [{ type: "text", text: `HTTP ${res.status}\n${text.slice(0, 3000)}` }] };
   }
 );
 

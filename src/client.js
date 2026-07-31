@@ -243,6 +243,30 @@ export class BowimiClient {
     return this._get("entity-visit/summary");
   }
 
+  /**
+   * Get activity feed.
+   * @param {{ _type: "all"|"survey"|"order"|"task", entityUuid?: string, userUuid?: string, from?: string, to?: string, snowDay?: string }} filter
+   */
+  getActivity(filter) {
+    return this._query("activity", filter);
+  }
+
+  /**
+   * Get survey question definitions for a survey.
+   * @param {string} surveyUuid
+   */
+  getSurvey(surveyUuid) {
+    return this._get(`survey/${surveyUuid}`);
+  }
+
+  /**
+   * Get full visit details from a survey response UUID.
+   * @param {string} responseUuid
+   */
+  getVisitFromResponse(responseUuid) {
+    return this._get(`visit/from-response/${responseUuid}`);
+  }
+
   // ── Notifications ──────────────────────────────────────────────────────────
 
   getLatestNotification() {
