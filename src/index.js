@@ -5,7 +5,7 @@ import { z } from "zod";
 import { BowimiAuth } from "./auth.js";
 import { BowimiClient } from "./client.js";
 
-const LOCAL_VERSION = "1.2.0";
+const LOCAL_VERSION = "1.3.0";
 const GITHUB_PKG_URL =
   "https://raw.githubusercontent.com/Caezarr/bowimi-mcp/main/package.json";
 
@@ -804,6 +804,307 @@ Calls list_users, then fetches task summary + order summary per user in parallel
     );
 
     return { content: [{ type: "text", text: JSON.stringify(reps, null, 2) }] };
+  }
+);
+
+// ── Visit & activity analytics ────────────────────────────────────────────
+
+server.tool(
+  "get_visit_counts",
+  `Count how many route stops were visited in a given period, based on each location's lastContacted date.
+Groups results by route group (proxy for rep, since groups are named by rep/day).
+Returns: total visited, breakdown by group, and the list of visited locations with their lastContacted date.
+
+LIMITATION: lastContacted is account-wide — it shows when the location was last visited by anyone, not specifically which rep. Use groupName as a proxy for rep attribution.`,
+  {
+    period: z.enum(["this_week", "this_month", "last_week", "last_month", "custom"]).default("this_week"),
+    from: z.string().optional().describe("ISO date for custom period start (e.g. 2026-07-01)"),
+    to: z.string().optional().describe("ISO date for custom period end (e.g. 2026-07-31)"),
+  },
+  async ({ period, from, to }) => {
+    const now = new Date();
+
+    let start, end;
+    if (period === "custom") {
+      start = new Date(from);
+      end = to ? new Date(to) : now;
+    } else {
+      const dow = now.getDay(); // 0=Sun
+      const monday = new Date(now); monday.setDate(now.getDate() - ((dow + 6) % 7)); monday.setHours(0,0,0,0);
+      const lastMonday = new Date(monday); lastMonday.setDate(monday.getDate() - 7);
+      const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const firstOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+      if (period === "this_week")   { start = monday; end = now; }
+      if (period === "last_week")   { start = lastMonday; end = monday; }
+      if (period === "this_month")  { start = firstOfMonth; end = now; }
+      if (period === "last_month")  { start = firstOfLastMonth; end = firstOfMonth; }
+    }
+
+    // Fetch all route stops + entity details
+    const stops = await client.getRoute();
+    if (!stops?.length) return { content: [{ type: "text", text: "Route is empty." }] };
+
+    const uuids = stops.map(s => s.entityUuid);
+    const entityMap = {};
+    for (let i = 0; i < uuids.length; i += 50) {
+      Object.assign(entityMap, await client.getEntities(uuids.slice(i, i + 50)));
+    }
+
+    // Filter by lastContacted in period
+    const visited = [];
+    const notVisited = [];
+    for (const s of stops) {
+      const e = entityMap[s.entityUuid] ?? {};
+      const lc = e.lastContacted ? new Date(e.lastContacted) : null;
+      const inPeriod = lc && lc >= start && lc <= end;
+      const entry = {
+        entityUuid: s.entityUuid,
+        name: e.name ?? null,
+        address: e.address ?? null,
+        groupName: s.groupName ?? null,
+        lastContacted: e.lastContacted ?? null,
+      };
+      (inPeriod ? visited : notVisited).push(entry);
+    }
+
+    // Group visited by groupName
+    const byGroup = {};
+    for (const v of visited) {
+      const g = v.groupName ?? "(no group)";
+      if (!byGroup[g]) byGroup[g] = [];
+      byGroup[g].push(v);
+    }
+
+    const result = {
+      period: period === "custom" ? `${start.toISOString().slice(0,10)} → ${end.toISOString().slice(0,10)}` : period,
+      total_stops: stops.length,
+      visited: visited.length,
+      not_visited: notVisited.length,
+      visit_rate_pct: Math.round((visited.length / stops.length) * 100),
+      by_group: Object.entries(byGroup)
+        .sort((a, b) => b[1].length - a[1].length)
+        .map(([group, stops]) => ({ group, count: stops.length, stops })),
+    };
+
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_introductions",
+  `Get product introductions (new listings) per location.
+
+Returns the stocked and proposed product UUIDs per route stop, enriched with product names and location names.
+
+IMPORTANT LIMITATION: The Bowimi activity feed endpoint (QUERY /activity) returns a server-side error for all request formats — this is a confirmed Bowimi API bug. As a result, it is impossible to retrieve introduction events (visit outcomes) or filter introductions by date, rep, or period via this API.
+
+What this tool CAN show: the current product listing state per location (stocked / proposed products), which reflects cumulative introductions to date. It cannot show when a product was introduced or by whom.
+
+To get historical introduction data, Bowimi support must fix the /activity endpoint or expose a dedicated introductions endpoint.`,
+  {
+    groupFilter: z.string().optional().describe("Filter by route group name (partial match). E.g. 'horeca', 'namur'"),
+    onlyWithProducts: z.boolean().default(false).describe("Only return locations that have at least one product listed"),
+  },
+  async ({ groupFilter, onlyWithProducts }) => {
+    let stops = await client.getRoute();
+    if (!stops?.length) return { content: [{ type: "text", text: "Route is empty." }] };
+
+    if (groupFilter) {
+      const gf = groupFilter.toLowerCase();
+      stops = stops.filter(s => s.groupName?.toLowerCase().includes(gf));
+    }
+
+    const uuids = stops.map(s => s.entityUuid);
+    const entityMap = {};
+    const productsMap = {};
+
+    for (let i = 0; i < uuids.length; i += 50) {
+      const batch = uuids.slice(i, i + 50);
+      await Promise.all([
+        client.getEntities(batch).then(d => Object.assign(entityMap, d)),
+        client.getEntityProducts(batch).then(d => Object.assign(productsMap, d)),
+      ]);
+    }
+
+    // Get product catalog to resolve names
+    const catalog = await client.listProducts();
+    const productNames = {};
+    for (const range of (catalog ?? [])) {
+      for (const uuid of (range.productUuids ?? [])) {
+        productNames[uuid] = range.name ?? uuid;
+      }
+    }
+
+    // Get full product details for any UUIDs found
+    const allProductUuids = new Set();
+    for (const p of Object.values(productsMap)) {
+      for (const uuid of [...(p?.stocked ?? []), ...(p?.proposed ?? [])]) {
+        allProductUuids.add(uuid);
+      }
+    }
+    let productDetails = {};
+    if (allProductUuids.size > 0) {
+      productDetails = await client.getProductDetails([...allProductUuids]).catch(() => ({}));
+    }
+
+    const locations = stops
+      .map(s => {
+        const e = entityMap[s.entityUuid] ?? {};
+        const p = productsMap[s.entityUuid] ?? {};
+        const stocked = (p.stocked ?? []).map(uuid => ({
+          productUuid: uuid,
+          name: productDetails[uuid]?.name ?? productNames[uuid] ?? uuid,
+        }));
+        const proposed = (p.proposed ?? []).map(uuid => ({
+          productUuid: uuid,
+          name: productDetails[uuid]?.name ?? productNames[uuid] ?? uuid,
+        }));
+        return {
+          entityUuid: s.entityUuid,
+          name: e.name ?? null,
+          address: e.address ?? null,
+          groupName: s.groupName ?? null,
+          lastContacted: e.lastContacted ?? null,
+          stocked_count: stocked.length,
+          proposed_count: proposed.length,
+          stocked,
+          proposed,
+        };
+      })
+      .filter(l => !onlyWithProducts || l.stocked_count > 0 || l.proposed_count > 0);
+
+    // Summary by product
+    const byProduct = {};
+    for (const l of locations) {
+      for (const p of l.stocked) {
+        if (!byProduct[p.productUuid]) byProduct[p.productUuid] = { name: p.name, stocked_at: [], proposed_at: [] };
+        byProduct[p.productUuid].stocked_at.push({ entityUuid: l.entityUuid, name: l.name, groupName: l.groupName });
+      }
+      for (const p of l.proposed) {
+        if (!byProduct[p.productUuid]) byProduct[p.productUuid] = { name: p.name, stocked_at: [], proposed_at: [] };
+        byProduct[p.productUuid].proposed_at.push({ entityUuid: l.entityUuid, name: l.name, groupName: l.groupName });
+      }
+    }
+
+    const result = {
+      api_limitation: "Historical introduction events unavailable — Bowimi /activity endpoint has a server-side bug. Showing current product listing state only.",
+      total_locations: locations.length,
+      locations_with_stocked_products: locations.filter(l => l.stocked_count > 0).length,
+      locations_with_proposed_products: locations.filter(l => l.proposed_count > 0).length,
+      by_product: Object.values(byProduct).sort((a, b) =>
+        (b.stocked_at.length + b.proposed_at.length) - (a.stocked_at.length + a.proposed_at.length)
+      ),
+      locations,
+    };
+
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_weekly_report",
+  `Full recap of the week's field sales activity.
+Aggregates: visit counts (from lastContacted), task status, orders, route completion, cold stops.
+Groups visits by route group as proxy for rep.
+Use this for a weekly overview before a team meeting or to send a summary.`,
+  {
+    weeksAgo: z.number().int().min(0).max(12).default(0).describe("0 = this week, 1 = last week, etc."),
+  },
+  async ({ weeksAgo }) => {
+    const now = new Date();
+    const dow = now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - ((dow + 6) % 7) - weeksAgo * 7);
+    monday.setHours(0, 0, 0, 0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 7);
+
+    const weekLabel = weeksAgo === 0
+      ? `This week (${monday.toISOString().slice(0,10)} → today)`
+      : `Week of ${monday.toISOString().slice(0,10)}`;
+
+    // Fetch everything in parallel
+    const [stops, visitSummary, taskSummary, orderSummary, users] = await Promise.all([
+      client.getRoute(),
+      client.getVisitSummary(),
+      client.getTaskSummary(),
+      client.getOrderSummary(),
+      client.listUsers(),
+    ]);
+
+    // Enrich stops with entity details
+    const uuids = stops.map(s => s.entityUuid);
+    const entityMap = {};
+    for (let i = 0; i < uuids.length; i += 50) {
+      Object.assign(entityMap, await client.getEntities(uuids.slice(i, i + 50)));
+    }
+
+    // Count visits this week per group
+    const visitedThisWeek = [];
+    const coldStops = []; // not visited in 90+ days
+    for (const s of stops) {
+      const e = entityMap[s.entityUuid] ?? {};
+      const lc = e.lastContacted ? new Date(e.lastContacted) : null;
+      const entry = {
+        entityUuid: s.entityUuid,
+        name: e.name ?? null,
+        groupName: s.groupName ?? null,
+        lastContacted: e.lastContacted ?? null,
+      };
+      if (lc && lc >= monday && lc < sunday) visitedThisWeek.push(entry);
+      const ninetyDaysAgo = new Date(now); ninetyDaysAgo.setDate(now.getDate() - 90);
+      if (!lc || lc < ninetyDaysAgo) coldStops.push(entry);
+    }
+
+    const visitsByGroup = {};
+    for (const v of visitedThisWeek) {
+      const g = v.groupName ?? "(no group)";
+      if (!visitsByGroup[g]) visitsByGroup[g] = 0;
+      visitsByGroup[g]++;
+    }
+
+    // Per-user task/order stats
+    const repStats = await Promise.all(
+      users.map(async u => {
+        const [t, o] = await Promise.all([
+          client.getTaskSummary(u.userUuid).catch(() => null),
+          client.getOrderSummary(u.userUuid).catch(() => null),
+        ]);
+        return { name: u.name, tasks: t, orders: o };
+      })
+    );
+
+    const report = {
+      week: weekLabel,
+      visits: {
+        total_route_stops: stops.length,
+        visited_this_week: visitedThisWeek.length,
+        visit_rate_pct: Math.round((visitedThisWeek.length / stops.length) * 100),
+        by_group: Object.entries(visitsByGroup)
+          .sort((a, b) => b[1] - a[1])
+          .map(([group, count]) => ({ group, count })),
+        visited_locations: visitedThisWeek,
+        note: "Visit attribution by route group (proxy for rep — exact per-rep tracking requires Bowimi /activity endpoint, currently unavailable server-side)",
+      },
+      tasks: {
+        global: taskSummary,
+        per_rep: repStats.map(r => ({ name: r.name, ...r.tasks })),
+      },
+      orders: {
+        global: orderSummary,
+        per_rep: repStats.map(r => ({ name: r.name, ...r.orders })),
+      },
+      cold_stops: {
+        count: coldStops.length,
+        pct_of_route: Math.round((coldStops.length / stops.length) * 100),
+        stops: coldStops,
+      },
+      today: visitSummary,
+    };
+
+    return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
   }
 );
 
