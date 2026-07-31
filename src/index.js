@@ -5,7 +5,7 @@ import { z } from "zod";
 import { BowimiAuth } from "./auth.js";
 import { BowimiClient } from "./client.js";
 
-const LOCAL_VERSION = "1.1.0";
+const LOCAL_VERSION = "1.2.0";
 const GITHUB_PKG_URL =
   "https://raw.githubusercontent.com/Caezarr/bowimi-mcp/main/package.json";
 
@@ -523,6 +523,287 @@ server.tool(
   async () => {
     const data = await client.listShortcuts();
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+// ── Composite tools ────────────────────────────────────────────────────────
+
+server.tool(
+  "get_location_full_profile",
+  `Get everything about a location in a single call: details, tags, products, contacts, and task status.
+Combines 5 API calls in parallel. Use this instead of calling get_location + get_location_tags + get_location_products + get_location_contacts + get_location_task_status separately.`,
+  {
+    entityUuid: z.string().describe("Location UUID (from get_route or get_location)"),
+  },
+  async ({ entityUuid }) => {
+    const [entityMap, tagsMap, productsMap, taskMap, contactUuids] = await Promise.all([
+      client.getEntities([entityUuid]),
+      client.getEntityTags([entityUuid]),
+      client.getEntityProducts([entityUuid]),
+      client.getEntityTaskStatuses([entityUuid]),
+      client.getEntityContactUuids(entityUuid),
+    ]);
+
+    const entity = entityMap?.[entityUuid] ?? {};
+    const tagUuids = tagsMap?.[entityUuid] ?? [];
+
+    // Resolve tag names from the tag list
+    let tagDetails = [];
+    if (tagUuids.length) {
+      const allTags = await client.listTags();
+      const tagMap = {};
+      for (const group of (allTags ?? [])) {
+        for (const tag of (group.tags ?? [])) {
+          tagMap[tag.tagUuid] = { name: tag.tagName, group: group.groupName };
+        }
+      }
+      tagDetails = tagUuids.map(uuid => tagMap[uuid] ?? { uuid });
+    }
+
+    let contacts = [];
+    if (contactUuids?.length) {
+      const contactDetails = await client.getContactDetails(contactUuids);
+      contacts = Object.values(contactDetails ?? {});
+    }
+
+    const profile = {
+      entityUuid,
+      name: entity.name ?? null,
+      address: entity.address ?? null,
+      coordinates: entity.coordinates ?? null,
+      phone: entity.phone ?? null,
+      lastContacted: entity.lastContacted ?? null,
+      tags: tagDetails,
+      products: productsMap?.[entityUuid] ?? null,
+      taskStatus: taskMap?.[entityUuid] ?? null,
+      contacts,
+    };
+
+    return { content: [{ type: "text", text: JSON.stringify(profile, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_route_summary",
+  `Fast overview of the current user's route without fetching full location details.
+Returns: total stop count, completion rate, breakdown by group, list of all groups.
+Use this for a quick status check before deciding which stops to investigate further.`,
+  {},
+  async () => {
+    const stops = await client.getRoute();
+    if (!stops?.length) {
+      return { content: [{ type: "text", text: JSON.stringify({ total: 0, groups: [] }) }] };
+    }
+
+    const groups = {};
+    for (const s of stops) {
+      const g = s.groupName ?? "(no group)";
+      if (!groups[g]) groups[g] = { name: g, total: 0, completed: 0 };
+      groups[g].total++;
+      if (s.complete) groups[g].completed++;
+    }
+
+    const total = stops.length;
+    const completed = stops.filter(s => s.complete).length;
+
+    const summary = {
+      total_stops: total,
+      completed,
+      pending: total - completed,
+      completion_pct: Math.round((completed / total) * 100),
+      groups: Object.values(groups).sort((a, b) => b.total - a.total),
+    };
+
+    return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_route_stops_with_tasks",
+  `Return route stops that have at least one pending task.
+Fetches the full route, checks task status for all stops in parallel batches, and returns only the ones with active tasks — enriched with location name and address.`,
+  {
+    includeCompleted: z.boolean().default(false).describe("Also include stops with completed tasks"),
+  },
+  async ({ includeCompleted }) => {
+    const stops = await client.getRoute();
+    if (!stops?.length) {
+      return { content: [{ type: "text", text: "Route is empty." }] };
+    }
+
+    const uuids = stops.map(s => s.entityUuid);
+
+    // Batch task-status and entity details in parallel
+    const BATCH = 50;
+    const taskMap = {};
+    const entityMap = {};
+
+    const batches = [];
+    for (let i = 0; i < uuids.length; i += BATCH) batches.push(uuids.slice(i, i + BATCH));
+
+    await Promise.all(
+      batches.flatMap(batch => [
+        client.getEntityTaskStatuses(batch).then(d => Object.assign(taskMap, d)),
+        client.getEntities(batch).then(d => Object.assign(entityMap, d)),
+      ])
+    );
+
+    const withTasks = stops
+      .filter(s => {
+        const ts = taskMap[s.entityUuid];
+        if (!ts) return false;
+        if (includeCompleted) return true;
+        return ts.pendingCount > 0 || ts.overdueCount > 0 || (typeof ts === "object" && ts !== null);
+      })
+      .map(s => {
+        const e = entityMap[s.entityUuid] ?? {};
+        return {
+          sequence: s.sequence,
+          entityUuid: s.entityUuid,
+          groupName: s.groupName ?? null,
+          name: e.name ?? null,
+          address: e.address ?? null,
+          lastContacted: e.lastContacted ?? null,
+          taskStatus: taskMap[s.entityUuid],
+        };
+      });
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ count: withTasks.length, stops: withTasks }, null, 2),
+      }],
+    };
+  }
+);
+
+server.tool(
+  "find_route_stops_by_tag",
+  `Find route stops that have a specific tag applied.
+Useful for: "show me all Horeca stops", "which stops are tagged High priority?", "find Delhaize locations on my route".
+Pass a tag name (partial, case-insensitive, matches tag name OR group name) or an exact tag UUID.
+Use list_tags first to see available tag groups and tag names.`,
+  {
+    tagName: z.string().optional().describe("Tag name or group name to search (partial, case-insensitive). E.g. 'horeca', 'high', 'delhaize', 'retail'"),
+    tagUuid: z.string().optional().describe("Exact tag UUID (from list_tags). Takes priority over tagName."),
+  },
+  async ({ tagName, tagUuid }) => {
+    if (!tagName && !tagUuid) {
+      return { content: [{ type: "text", text: "Provide tagName or tagUuid." }] };
+    }
+
+    // Resolve tagUuid — match on tagName OR groupName
+    let resolvedTagUuid = tagUuid;
+    let resolvedTagLabel = tagUuid;
+    if (!resolvedTagUuid && tagName) {
+      const allTags = await client.listTags();
+      const needle = tagName.toLowerCase();
+      // First try exact tag name match, then group match (returns all tags in group)
+      const candidates = [];
+      for (const group of (allTags ?? [])) {
+        for (const tag of (group.tags ?? [])) {
+          if (tag.tagName?.toLowerCase().includes(needle)) {
+            candidates.push({ tagUuid: tag.tagUuid, label: `${group.groupName} / ${tag.tagName}` });
+          }
+        }
+      }
+      // If no tag-name match, try group-name match (return first tag in group as hint)
+      if (!candidates.length) {
+        for (const group of (allTags ?? [])) {
+          if (group.groupName?.toLowerCase().includes(needle)) {
+            for (const tag of (group.tags ?? [])) {
+              candidates.push({ tagUuid: tag.tagUuid, label: `${group.groupName} / ${tag.tagName}` });
+            }
+          }
+        }
+      }
+      if (!candidates.length) {
+        return { content: [{ type: "text", text: `No tag found matching "${tagName}". Use list_tags to see all available tags.` }] };
+      }
+      if (candidates.length > 1) {
+        // Return all matching tags so user can pick
+        return {
+          content: [{
+            type: "text",
+            text: `Multiple tags match "${tagName}". Specify tagUuid:\n${candidates.map(c => `  ${c.label} → ${c.tagUuid}`).join("\n")}`,
+          }],
+        };
+      }
+      resolvedTagUuid = candidates[0].tagUuid;
+      resolvedTagLabel = candidates[0].label;
+    }
+
+    const stops = await client.getRoute();
+    if (!stops?.length) {
+      return { content: [{ type: "text", text: "Route is empty." }] };
+    }
+
+    const uuids = stops.map(s => s.entityUuid);
+    const BATCH = 50;
+    const tagsMap = {};
+    const entityMap = {};
+
+    const batches = [];
+    for (let i = 0; i < uuids.length; i += BATCH) batches.push(uuids.slice(i, i + BATCH));
+
+    await Promise.all(
+      batches.flatMap(b => [
+        client.getEntityTags(b).then(d => Object.assign(tagsMap, d)),
+        client.getEntities(b).then(d => Object.assign(entityMap, d)),
+      ])
+    );
+
+    const matched = stops
+      .filter(s => (tagsMap[s.entityUuid] ?? []).includes(resolvedTagUuid))
+      .map(s => {
+        const e = entityMap[s.entityUuid] ?? {};
+        return {
+          sequence: s.sequence,
+          entityUuid: s.entityUuid,
+          groupName: s.groupName ?? null,
+          name: e.name ?? null,
+          address: e.address ?? null,
+          lastContacted: e.lastContacted ?? null,
+        };
+      });
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ tag: resolvedTagLabel, tagUuid: resolvedTagUuid, count: matched.length, stops: matched }, null, 2),
+      }],
+    };
+  }
+);
+
+server.tool(
+  "get_team_overview",
+  `Get task and order stats for every rep in the team — useful for managers.
+Calls list_users, then fetches task summary + order summary per user in parallel.`,
+  {},
+  async () => {
+    const users = await client.listUsers();
+    if (!users?.length) {
+      return { content: [{ type: "text", text: "No users found." }] };
+    }
+
+    const reps = await Promise.all(
+      users.map(async (u) => {
+        const [tasks, orders] = await Promise.all([
+          client.getTaskSummary(u.userUuid).catch(() => null),
+          client.getOrderSummary(u.userUuid).catch(() => null),
+        ]);
+        return {
+          userUuid: u.userUuid,
+          name: u.name,
+          email: u.email ?? null,
+          tasks,
+          orders,
+        };
+      })
+    );
+
+    return { content: [{ type: "text", text: JSON.stringify(reps, null, 2) }] };
   }
 );
 
