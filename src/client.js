@@ -163,8 +163,8 @@ export class BowimiClient {
 
   // ── Tasks ──────────────────────────────────────────────────────────────────
 
-  getTaskSummary() {
-    return this._get("task-summary");
+  getTaskSummary(userUuid) {
+    return this._get("task-summary", userUuid ? { userUuid } : undefined);
   }
 
   /**
@@ -176,8 +176,8 @@ export class BowimiClient {
 
   // ── Orders ─────────────────────────────────────────────────────────────────
 
-  getOrderSummary() {
-    return this._get("order/summary");
+  getOrderSummary(userUuid) {
+    return this._get("order/summary", userUuid ? { userUuid } : undefined);
   }
 
   /**

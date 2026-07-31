@@ -5,6 +5,22 @@ import { z } from "zod";
 import { BowimiAuth } from "./auth.js";
 import { BowimiClient } from "./client.js";
 
+const LOCAL_VERSION = "1.1.0";
+const GITHUB_PKG_URL =
+  "https://raw.githubusercontent.com/Caezarr/bowimi-mcp/main/package.json";
+
+// Fire-and-forget update check — never blocks startup
+fetch(GITHUB_PKG_URL)
+  .then((r) => r.json())
+  .then((pkg) => {
+    if (pkg.version && pkg.version !== LOCAL_VERSION) {
+      console.error(
+        `[bowimi-mcp] Update available: ${LOCAL_VERSION} → ${pkg.version}. Run: git pull && npm install`
+      );
+    }
+  })
+  .catch(() => {}); // offline or rate-limited — silent
+
 const EMAIL = process.env.BOWIMI_EMAIL;
 const PASSWORD = process.env.BOWIMI_PASSWORD;
 const SUBDOMAIN = process.env.BOWIMI_SUBDOMAIN;
@@ -22,7 +38,7 @@ const client = new BowimiClient(auth);
 
 const server = new McpServer({
   name: "bowimi",
-  version: "1.0.0",
+  version: LOCAL_VERSION,
 });
 
 // ── App ────────────────────────────────────────────────────────────────────
@@ -361,31 +377,91 @@ server.tool(
 
 server.tool(
   "get_route",
-  "Get My Route: current user's planned stops ordered by sequence, with location name, group, and coordinates",
+  `Get the current user's planned stops (My Route) enriched with location details.
+
+Returns all stops with: name, address, coordinates, group name, completion status, lastContacted date.
+
+Filtering (all optional, applied client-side after fetch):
+- groupFilter: partial match on group name (case-insensitive), e.g. "namur", "horeca"
+- textFilter: partial match on location name or address
+- notVisitedSince: ISO date — only stops where lastContacted is null or before this date
+- completedOnly / pendingOnly: filter by completion status
+
+NOTE: This is the primary way to discover locations in Bowimi. The geographic search endpoint is unavailable server-side. If a region is not represented here, those locations have not been added to the current user's route in Bowimi.`,
   {
-    includeDetails: z.boolean().default(true).describe("Fetch location names for each stop"),
+    includeDetails: z.boolean().default(true).describe("Fetch full location details (name, address, lastContacted). Disable only if you just need UUIDs."),
+    groupFilter: z.string().optional().describe("Filter stops by group name (partial, case-insensitive). E.g. 'namur', 'horeca bxl'"),
+    textFilter: z.string().optional().describe("Filter stops by location name or address (partial, case-insensitive)"),
+    notVisitedSince: z.string().optional().describe("ISO 8601 date — return only stops not contacted since this date (or never)"),
+    completedOnly: z.boolean().optional().describe("Only return completed stops"),
+    pendingOnly: z.boolean().optional().describe("Only return pending (not yet completed) stops"),
   },
-  async ({ includeDetails }) => {
+  async ({ includeDetails, groupFilter, textFilter, notVisitedSince, completedOnly, pendingOnly }) => {
     const stops = await client.getRoute();
-    if (!includeDetails || !stops?.length) {
-      return { content: [{ type: "text", text: JSON.stringify(stops, null, 2) }] };
+    if (!stops?.length) {
+      return { content: [{ type: "text", text: "Route is empty." }] };
     }
-    // Enrich stops with entity names (batch, max 50 at a time)
-    const uuids = stops.map(s => s.entityUuid);
-    const batches = [];
-    for (let i = 0; i < uuids.length; i += 50) batches.push(uuids.slice(i, i + 50));
+
+    let result = stops;
+
+    // Apply group filter before fetching details (saves API calls)
+    if (groupFilter) {
+      const gf = groupFilter.toLowerCase();
+      result = result.filter(s => s.groupName?.toLowerCase().includes(gf));
+    }
+    if (completedOnly) result = result.filter(s => s.complete === true);
+    if (pendingOnly) result = result.filter(s => s.complete !== true);
+
+    if (!includeDetails) {
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+
+    // Enrich with entity details (batch 50 at a time)
+    const uuids = result.map(s => s.entityUuid);
     const entityMap = {};
-    for (const batch of batches) {
+    for (let i = 0; i < uuids.length; i += 50) {
+      const batch = uuids.slice(i, i + 50);
       const data = await client.getEntities(batch);
       Object.assign(entityMap, data);
     }
-    const enriched = stops.map(s => ({
-      ...s,
-      name: entityMap[s.entityUuid]?.name ?? null,
-      address: entityMap[s.entityUuid]?.address ?? null,
-      lastContacted: entityMap[s.entityUuid]?.lastContacted ?? null,
-    }));
-    return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
+
+    let enriched = result.map(s => {
+      const e = entityMap[s.entityUuid] ?? {};
+      return {
+        sequence: s.sequence,
+        entityUuid: s.entityUuid,
+        complete: s.complete,
+        groupName: s.groupName ?? null,
+        name: e.name ?? null,
+        address: e.address ?? null,
+        coordinates: e.coordinates ?? null,
+        lastContacted: e.lastContacted ?? null,
+        phone: e.phone ?? null,
+      };
+    });
+
+    // Post-enrich filters
+    if (textFilter) {
+      const tf = textFilter.toLowerCase();
+      enriched = enriched.filter(s =>
+        s.name?.toLowerCase().includes(tf) || s.address?.toLowerCase().includes(tf)
+      );
+    }
+    if (notVisitedSince) {
+      const cutoff = new Date(notVisitedSince);
+      enriched = enriched.filter(s =>
+        !s.lastContacted || new Date(s.lastContacted) < cutoff
+      );
+    }
+
+    const summary = {
+      total_route_stops: stops.length,
+      returned: enriched.length,
+      groups: [...new Set(enriched.map(s => s.groupName).filter(Boolean))],
+      stops: enriched,
+    };
+
+    return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
   }
 );
 
@@ -410,16 +486,30 @@ server.tool(
 // ── Insights ───────────────────────────────────────────────────────────────
 
 server.tool(
+  "get_location_task_status",
+  "Get task status for one or more locations. Returns pending/overdue task info per location UUID.",
+  {
+    entityUuids: z.array(z.string()).describe("Location UUIDs to check (from get_route or get_location)"),
+  },
+  async ({ entityUuids }) => {
+    const data = await client.getEntityTaskStatuses(entityUuids);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
   "get_insights",
-  "Get insights dashboard: visits, tasks, orders, and recent activity summary",
-  {},
-  async () => {
+  "Get combined insights: visits, tasks, and orders. Optionally filter by userUuid to get stats for a specific rep (useful for managers).",
+  {
+    userUuid: z.string().optional().describe("Filter by rep UUID (from list_users). Omit for current user."),
+  },
+  async ({ userUuid }) => {
     const [visits, tasks, orders] = await Promise.all([
       client.getVisitSummary(),
-      client.getTaskSummary(),
-      client.getOrderSummary(),
+      client.getTaskSummary(userUuid),
+      client.getOrderSummary(userUuid),
     ]);
-    const insights = { visits, tasks, orders };
+    const insights = { userUuid: userUuid ?? "current", visits, tasks, orders };
     return { content: [{ type: "text", text: JSON.stringify(insights, null, 2) }] };
   }
 );
