@@ -1,6 +1,6 @@
 {
   "name": "bowimi-mcp",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "MCP server for Bowimi field sales CRM",
   "type": "module",
   "bin": {

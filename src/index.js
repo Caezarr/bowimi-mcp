@@ -5,7 +5,7 @@ import { z } from "zod";
 import { BowimiAuth } from "./auth.js";
 import { BowimiClient } from "./client.js";
 
-const LOCAL_VERSION = "1.5.0";
+const LOCAL_VERSION = "1.5.1";
 const GITHUB_PKG_URL =
   "https://raw.githubusercontent.com/Caezarr/bowimi-mcp/main/package.json";
 
@@ -1294,58 +1294,70 @@ Parameters:
       } catch {}
     }
 
-    // Step 5: for each response, fetch answers and identify introductions
+    // Step 5: fetch answers concurrently (10 at a time) then identify introductions
     const details = [];
     const byRep = {};
     const byLocation = {};
     const byProduct = {};
     const kws = introductionKeywords.map(k => k.toLowerCase());
+    const CONCURRENCY = 10;
 
-    for (const resp of responses) {
-      // Get question definitions to find intro questions
-      const questions = await getSurveyQuestions(resp.surveyUuid);
-      const introQuestionUuids = new Set(
-        questions
-          .filter(q => kws.some(kw => q.text.toLowerCase().includes(kw)))
-          .map(q => q.questionUuid)
-      );
-      if (introQuestionUuids.size === 0) continue;
+    // Pre-cache all survey question sets
+    const surveyUuids = [...new Set(responses.map(r => r.surveyUuid).filter(Boolean))];
+    await Promise.all(surveyUuids.map(u => getSurveyQuestions(u)));
 
-      // Fetch answers via official endpoint
-      let answersData;
-      try { answersData = await client.getSurveyResponseAnswers(resp.responseUuid); } catch { continue; }
+    // Batch concurrent fetch of answers
+    for (let i = 0; i < responses.length; i += CONCURRENCY) {
+      const batch = responses.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.all(batch.map(resp =>
+        client.getSurveyResponseAnswers(resp.responseUuid)
+          .then(a => ({ resp, items: a.items || [] }))
+          .catch(() => null)
+      ));
 
-      const introducedProducts = [];
-      for (const item of (answersData.items || [])) {
-        if (!introQuestionUuids.has(item.questionUuid)) continue;
-        const raw = item.value || "";
-        // multichoice comes as comma-separated string
-        const vals = raw.split(",").map(v => v.trim()).filter(v => v && v.toLowerCase() !== "none");
-        introducedProducts.push(...vals);
-      }
+      for (const result of batchResults) {
+        if (!result) continue;
+        const { resp, items } = result;
 
-      if (introducedProducts.length === 0) continue;
+        const questions = surveyCache[resp.surveyUuid] || [];
+        const introQuestionUuids = new Set(
+          questions
+            .filter(q => kws.some(kw => q.text.toLowerCase().includes(kw)))
+            .map(q => q.questionUuid)
+        );
+        if (introQuestionUuids.size === 0) continue;
 
-      const repUuid = resp.userUuid;
-      const locUuid = resp.entityUuid;
-      const repName = userMap[repUuid] || repUuid || "Unknown";
-      const locName = entityMap[locUuid] || locUuid || "Unknown";
+        const introducedProducts = [];
+        for (const item of items) {
+          if (!introQuestionUuids.has(item.questionUuid)) continue;
+          const raw = item.value || "";
+          const vals = raw.split(",").map(v => v.trim())
+            .filter(v => v && !["none", "no", "false", "yes"].includes(v.toLowerCase()));
+          introducedProducts.push(...vals);
+        }
+        if (introducedProducts.length === 0) continue;
 
-      details.push({
-        date: resp.createdAt,
-        repName,
-        locationName: locName,
-        products_introduced: introducedProducts,
-      });
+        const repUuid = resp.userUuid;
+        const locUuid = resp.entityUuid;
+        const repName = userMap[repUuid] || repUuid || "Unknown";
+        const locName = entityMap[locUuid] || locUuid || "Unknown";
 
-      if (!byRep[repUuid]) byRep[repUuid] = { userUuid: repUuid, repName, count: 0 };
-      byRep[repUuid].count += introducedProducts.length;
+        details.push({
+          date: resp.createdAt,
+          repName,
+          locationName: locName,
+          products_introduced: introducedProducts,
+        });
 
-      if (!byLocation[locUuid]) byLocation[locUuid] = { entityUuid: locUuid, locationName: locName, count: 0 };
-      byLocation[locUuid].count += introducedProducts.length;
+        if (!byRep[repUuid]) byRep[repUuid] = { userUuid: repUuid, repName, count: 0 };
+        byRep[repUuid].count += introducedProducts.length;
 
-      for (const p of introducedProducts) {
-        byProduct[p] = (byProduct[p] || 0) + 1;
+        if (!byLocation[locUuid]) byLocation[locUuid] = { entityUuid: locUuid, locationName: locName, count: 0 };
+        byLocation[locUuid].count += introducedProducts.length;
+
+        for (const p of introducedProducts) {
+          byProduct[p] = (byProduct[p] || 0) + 1;
+        }
       }
     }
 
