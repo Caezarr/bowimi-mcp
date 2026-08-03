@@ -260,11 +260,59 @@ export class BowimiClient {
   }
 
   /**
-   * Get full visit details from a survey response UUID.
+   * Get survey questions via official endpoint (preferred).
+   * @param {string} surveyUuid
+   */
+  getSurveyQuestions(surveyUuid) {
+    return this._get(`surveys/${surveyUuid}/questions`);
+  }
+
+  /**
+   * Query survey responses (official paginated endpoint).
+   * @param {{ createdAfter?: string, createdBefore?: string, entityUuids?: string[], surveyUuids?: string[], responseUuids?: string[], limit?: number, offset?: number }} body
+   */
+  querySurveyResponses(body) {
+    return this._query(
+      "survey-responses?fields=createdAt,entityUuid,responseUuid,surveyUuid,userUuid,verified",
+      body
+    );
+  }
+
+  /**
+   * Get answers for a survey response (official endpoint).
+   * Returns {responseUuid, items: [{questionUuid, value: string}], total}
+   * @param {string} responseUuid
+   */
+  getSurveyResponseAnswers(responseUuid) {
+    return this._get(`survey-responses/${responseUuid}/answers`);
+  }
+
+  /**
+   * Get full visit details from a survey response UUID (legacy).
    * @param {string} responseUuid
    */
   getVisitFromResponse(responseUuid) {
     return this._get(`visit/from-response/${responseUuid}`);
+  }
+
+  /**
+   * Query locations with pagination and optional search.
+   * @param {{ searchTerm?: string, entityUuids?: string[], limit?: number, offset?: number }} body
+   * @param {string} fields  comma-separated field list
+   */
+  queryLocations(body, fields = "entityUuid,name,address") {
+    return this._query(`locations?fields=${fields}`, body);
+  }
+
+  /**
+   * Query tasks with filters.
+   * @param {{ entityUuids?: string[], taskUuids?: string[], resolved?: boolean, limit?: number, offset?: number }} body
+   */
+  queryTasks(body) {
+    return this._query(
+      "tasks?fields=taskUuid,title,status,dueDate,entityUuid,allocatedUserUuids,description,resolvedAt,createdAt,createdBy,source",
+      body
+    );
   }
 
   // ── Notifications ──────────────────────────────────────────────────────────

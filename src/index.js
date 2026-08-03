@@ -5,7 +5,7 @@ import { z } from "zod";
 import { BowimiAuth } from "./auth.js";
 import { BowimiClient } from "./client.js";
 
-const LOCAL_VERSION = "1.4.0";
+const LOCAL_VERSION = "1.5.0";
 const GITHUB_PKG_URL =
   "https://raw.githubusercontent.com/Caezarr/bowimi-mcp/main/package.json";
 
@@ -1160,12 +1160,51 @@ server.tool(
 
 server.tool(
   "get_survey_response",
-  "Get full survey response for one visit, including all question answers. Pass a responseUuid from get_activity (details.responseUuid).",
+  `Get answers for a survey response by responseUuid.
+
+Returns {responseUuid, items: [{questionUuid, value}], total}.
+Use get_survey to map questionUuid → question text.
+
+To find responseUuids: use list_survey_responses.`,
   {
-    responseUuid: z.string().describe("Response UUID from activity feed (details.responseUuid)"),
+    responseUuid: z.string().describe("Response UUID"),
   },
   async ({ responseUuid }) => {
-    const data = await client.getVisitFromResponse(responseUuid);
+    const data = await client.getSurveyResponseAnswers(responseUuid);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "list_survey_responses",
+  `List survey responses with pagination and filters.
+
+Returns {items: [{createdAt, entityUuid, responseUuid, surveyUuid, userUuid, verified}], total, next, prev}.
+
+Filters (all optional):
+- createdAfter / createdBefore: ISO datetime e.g. "2026-07-01T00:00:00Z"
+- entityUuids: filter by locations (array)
+- surveyUuids: filter by surveys (array)
+- responseUuids: fetch specific responses (array)
+- limit: 1–100 (default 50)
+- offset: for pagination`,
+  {
+    createdAfter: z.string().optional().describe("ISO datetime e.g. 2026-07-01T00:00:00Z"),
+    createdBefore: z.string().optional().describe("ISO datetime e.g. 2026-07-31T23:59:59Z"),
+    entityUuids: z.array(z.string()).optional(),
+    surveyUuids: z.array(z.string()).optional(),
+    responseUuids: z.array(z.string()).optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ createdAfter, createdBefore, entityUuids, surveyUuids, responseUuids, limit, offset }) => {
+    const body = { limit, offset };
+    if (createdAfter) body.createdAfter = createdAfter;
+    if (createdBefore) body.createdBefore = createdBefore;
+    if (entityUuids?.length) body.entityUuids = entityUuids;
+    if (surveyUuids?.length) body.surveyUuids = surveyUuids;
+    if (responseUuids?.length) body.responseUuids = responseUuids;
+    const data = await client.querySurveyResponses(body);
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   }
 );
@@ -1197,20 +1236,28 @@ Parameters:
     introductionKeywords: z.array(z.string()).default(["introduc", "new product", "nouveau", "nieuw", "geïntroduceerd"]),
   },
   async ({ from, to, userUuid, entityUuid, introductionKeywords }) => {
-    // Step 1: fetch all survey activity in range
-    const filter = { _type: "survey", from, to };
-    if (userUuid) filter.userUuid = userUuid;
-    if (entityUuid) filter.entityUuid = entityUuid;
-    filter.limit = 200;
+    // Step 1: fetch all survey responses via official paginated endpoint
+    const body = {
+      createdAfter: `${from}T00:00:00Z`,
+      createdBefore: `${to}T23:59:59Z`,
+      limit: 100,
+      offset: 0,
+    };
+    if (entityUuid) body.entityUuids = [entityUuid];
 
-    let activities = await client.getActivity(filter);
-    if (!Array.isArray(activities)) {
-      activities = activities?.items || activities?.data || [];
+    // Paginate through all responses
+    let responses = [];
+    let page = await client.querySurveyResponses(body);
+    responses.push(...(page.items || []));
+    while (page.next && responses.length < 500) {
+      page = await client.querySurveyResponses(page.next);
+      responses.push(...(page.items || []));
     }
 
-    const surveyActivities = activities.filter(a => a.details?.responseUuid);
+    // Filter by userUuid client-side (API doesn't support userUuid filter on survey-responses)
+    if (userUuid) responses = responses.filter(r => r.userUuid === userUuid);
 
-    if (surveyActivities.length === 0) {
+    if (responses.length === 0) {
       return { content: [{ type: "text", text: JSON.stringify({ summary: { total_introductions: 0, message: "No survey responses found for this period" } }, null, 2) }] };
     }
 
@@ -1222,79 +1269,75 @@ Parameters:
       userMap[u.userUuid || u.uuid] = u.name || u.displayName || u.email || u.userUuid;
     }
 
-    // Step 3: fetch survey definitions (cached by surveyUuid)
+    // Step 3: fetch survey questions (cached by surveyUuid)
     const surveyCache = {};
-    const getSurveyDef = async (surveyUuid) => {
-      if (!surveyUuid) return null;
+    const getSurveyQuestions = async (surveyUuid) => {
+      if (!surveyUuid) return [];
       if (!surveyCache[surveyUuid]) {
-        try { surveyCache[surveyUuid] = await client.getSurvey(surveyUuid); } catch { surveyCache[surveyUuid] = null; }
+        try {
+          const def = await client.getSurvey(surveyUuid);
+          surveyCache[surveyUuid] = def?.questions || [];
+        } catch { surveyCache[surveyUuid] = []; }
       }
       return surveyCache[surveyUuid];
     };
 
     // Step 4: fetch entity names for locations
-    const entityUuids = [...new Set(surveyActivities.map(a => a.entityUuid).filter(Boolean))];
-    let entityMap = {};
-    try {
-      const entities = await client.getEntities(entityUuids);
-      for (const e of (Array.isArray(entities) ? entities : [])) {
-        entityMap[e.entityUuid || e.uuid] = e.name || e.entityUuid;
-      }
-    } catch {}
+    const entityUuids = [...new Set(responses.map(r => r.entityUuid).filter(Boolean))];
+    const entityMap = {};
+    if (entityUuids.length) {
+      try {
+        const entities = await client.getEntities(entityUuids);
+        for (const e of (Array.isArray(entities) ? entities : [])) {
+          entityMap[e.entityUuid || e.uuid] = e.name || e.entityUuid;
+        }
+      } catch {}
+    }
 
-    // Step 5: for each activity, fetch response and identify introductions
+    // Step 5: for each response, fetch answers and identify introductions
     const details = [];
     const byRep = {};
     const byLocation = {};
     const byProduct = {};
+    const kws = introductionKeywords.map(k => k.toLowerCase());
 
-    for (const act of surveyActivities) {
-      let visit;
-      try { visit = await client.getVisitFromResponse(act.details.responseUuid); } catch { continue; }
-
-      const surveyUuid = visit.surveys?.[0]?.surveyUuid;
-      const surveyDef = await getSurveyDef(surveyUuid);
-      const questionMap = {};
-      for (const q of (surveyDef?.questions || [])) {
-        questionMap[q.questionUuid] = q.text;
-      }
-
-      // Find introduction questions by keyword match on question text
-      const kws = introductionKeywords.map(k => k.toLowerCase());
-      const introductionQuestionUuids = new Set(
-        Object.entries(questionMap)
-          .filter(([, text]) => kws.some(kw => text.toLowerCase().includes(kw)))
-          .map(([uuid]) => uuid)
+    for (const resp of responses) {
+      // Get question definitions to find intro questions
+      const questions = await getSurveyQuestions(resp.surveyUuid);
+      const introQuestionUuids = new Set(
+        questions
+          .filter(q => kws.some(kw => q.text.toLowerCase().includes(kw)))
+          .map(q => q.questionUuid)
       );
+      if (introQuestionUuids.size === 0) continue;
 
-      // Collect introduced products from those questions
+      // Fetch answers via official endpoint
+      let answersData;
+      try { answersData = await client.getSurveyResponseAnswers(resp.responseUuid); } catch { continue; }
+
       const introducedProducts = [];
-      for (const survey of (visit.surveys || [])) {
-        for (const [qUuid, answer] of Object.entries(survey.answers || {})) {
-          if (!introductionQuestionUuids.has(qUuid)) continue;
-          const vals = Array.isArray(answer.value) ? answer.value : [answer.value];
-          const nonNone = vals.filter(v => v && String(v).toLowerCase() !== "none" && String(v).trim() !== "");
-          introducedProducts.push(...nonNone);
-        }
+      for (const item of (answersData.items || [])) {
+        if (!introQuestionUuids.has(item.questionUuid)) continue;
+        const raw = item.value || "";
+        // multichoice comes as comma-separated string
+        const vals = raw.split(",").map(v => v.trim()).filter(v => v && v.toLowerCase() !== "none");
+        introducedProducts.push(...vals);
       }
 
       if (introducedProducts.length === 0) continue;
 
-      const repUuid = act.userUuid;
-      const locUuid = act.entityUuid;
-      const repName = userMap[repUuid] || repUuid;
-      const locName = entityMap[locUuid] || locUuid;
-      const surveyName = act.details?.surveyName || visit.name || "Unknown survey";
+      const repUuid = resp.userUuid;
+      const locUuid = resp.entityUuid;
+      const repName = userMap[repUuid] || repUuid || "Unknown";
+      const locName = entityMap[locUuid] || locUuid || "Unknown";
 
       details.push({
-        date: act.date,
+        date: resp.createdAt,
         repName,
         locationName: locName,
-        surveyName,
         products_introduced: introducedProducts,
       });
 
-      // Aggregate
       if (!byRep[repUuid]) byRep[repUuid] = { userUuid: repUuid, repName, count: 0 };
       byRep[repUuid].count += introducedProducts.length;
 
@@ -1314,7 +1357,7 @@ Parameters:
         total_introductions: totalIntroductions,
         unique_locations: Object.keys(byLocation).length,
         unique_reps: Object.keys(byRep).length,
-        responses_analyzed: surveyActivities.length,
+        responses_analyzed: responses.length,
       },
       by_rep: Object.values(byRep).sort((a, b) => b.count - a.count),
       by_location: Object.values(byLocation).sort((a, b) => b.count - a.count),
@@ -1323,6 +1366,63 @@ Parameters:
     };
 
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "list_locations",
+  `List locations (points of sale) with pagination and optional text search.
+
+Returns {items: [{entityUuid, name, address}], total, next, prev}.
+
+Use this to discover locations without needing the route. Supports full-text search and pagination.
+
+Parameters:
+- searchTerm: partial name or address search (optional)
+- entityUuids: fetch specific locations by UUID (optional)
+- limit: 1–100 (default 50)
+- offset: for pagination`,
+  {
+    searchTerm: z.string().optional().describe("Partial name or address search"),
+    entityUuids: z.array(z.string()).optional().describe("Fetch specific locations"),
+    limit: z.number().int().min(1).max(100).default(50),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ searchTerm, entityUuids, limit, offset }) => {
+    const body = { limit, offset };
+    if (searchTerm) body.searchTerm = searchTerm;
+    if (entityUuids?.length) body.entityUuids = entityUuids;
+    const data = await client.queryLocations(body);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "list_tasks",
+  `List tasks with filters and pagination.
+
+Returns {items: [{taskUuid, title, status, dueDate, entityUuid, allocatedUserUuids, description, resolvedAt, createdAt, source}], total, next, prev}.
+
+Parameters:
+- entityUuids: filter by locations (optional)
+- taskUuids: fetch specific tasks (optional)
+- resolved: true = resolved only, false = open only, omit = all
+- limit: 1–100 (default 50)
+- offset: for pagination`,
+  {
+    entityUuids: z.array(z.string()).optional(),
+    taskUuids: z.array(z.string()).optional(),
+    resolved: z.boolean().optional().describe("true = resolved, false = open, omit = all"),
+    limit: z.number().int().min(1).max(100).default(50),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ entityUuids, taskUuids, resolved, limit, offset }) => {
+    const body = { limit, offset };
+    if (entityUuids?.length) body.entityUuids = entityUuids;
+    if (taskUuids?.length) body.taskUuids = taskUuids;
+    if (resolved !== undefined) body.resolved = resolved;
+    const data = await client.queryTasks(body);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   }
 );
 
