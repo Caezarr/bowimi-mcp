@@ -98,6 +98,13 @@ export class BowimiClient {
 
   // ── Users ──────────────────────────────────────────────────────────────────
 
+  queryUsers(body) {
+    return this._query(
+      "users?fields=userUuid,name,friendlyName,emailAddress,enabled,roleUuids,avatar,owner",
+      body
+    );
+  }
+
   listUsers(fields) {
     return fields
       ? this._query("users", {}, { fields: fields.join(",") })
@@ -112,7 +119,19 @@ export class BowimiClient {
     return this._post("users", { email, roleUuid, name });
   }
 
+  updateUser(userUuid, data) {
+    return this._patch(`users/${userUuid}`, data);
+  }
+
+  deleteUser(userUuid) {
+    return this._delete(`users/${userUuid}`);
+  }
+
   // ── Tags ───────────────────────────────────────────────────────────────────
+
+  queryTags(body) {
+    return this._query("tags?fields=tagUuid,name,colour,groupName,tagGroupUuid,tagIndex", body);
+  }
 
   /**
    * @param {string} [intent] - "location" | "company" | undefined (all)
@@ -125,10 +144,112 @@ export class BowimiClient {
     return this._post("tags", { name, tagGroupUuid, description, colour });
   }
 
+  updateTag(tagUuid, data) {
+    return this._patch(`tags/${tagUuid}`, data);
+  }
+
+  deleteTag(tagUuid) {
+    return this._delete(`tags/${tagUuid}`);
+  }
+
+  // ── Tag groups ─────────────────────────────────────────────────────────────
+
+  queryTagGroups(body) {
+    return this._query("tag-groups?fields=tagGroupUuid,name,index,pipeline,scopes", body);
+  }
+
+  createTagGroup({ name, index, pipeline, scopes }) {
+    return this._post("tag-groups", { name, index, pipeline, scopes });
+  }
+
+  updateTagGroup(tagGroupUuid, data) {
+    return this._patch(`tag-groups/${tagGroupUuid}`, data);
+  }
+
+  deleteTagGroup(tagGroupUuid) {
+    return this._delete(`tag-groups/${tagGroupUuid}`);
+  }
+
+  // ── Roles ─────────────────────────────────────────────────────────────────
+
+  queryRoles(body) {
+    return this._query("roles?fields=roleUuid,name,permissionKeys", body);
+  }
+
+  createRole({ name, permissionKeys }) {
+    return this._post("roles", { name, permissionKeys });
+  }
+
+  updateRole(roleUuid, data) {
+    return this._patch(`roles/${roleUuid}`, data);
+  }
+
+  deleteRole(roleUuid) {
+    return this._delete(`roles/${roleUuid}`);
+  }
+
+  // ── Teams ─────────────────────────────────────────────────────────────────
+
+  queryTeams(body) {
+    return this._query("teams?fields=teamUuid,name,shortName,colour", body);
+  }
+
+  createTeam({ name, shortName, colour }) {
+    return this._post("teams", { name, shortName, colour });
+  }
+
+  updateTeam(teamUuid, data) {
+    return this._patch(`teams/${teamUuid}`, data);
+  }
+
+  deleteTeam(teamUuid) {
+    return this._delete(`teams/${teamUuid}`);
+  }
+
+  getTeamMembers(teamUuid) {
+    return this._get(`teams/${teamUuid}/members`);
+  }
+
+  addTeamMember(teamUuid, userUuid) {
+    return this._post(`teams/${teamUuid}/members`, { userUuid });
+  }
+
+  removeTeamMember(teamUuid, userUuid) {
+    return this._delete(`teams/${teamUuid}/members/${userUuid}`);
+  }
+
+  // ── Attributes ────────────────────────────────────────────────────────────
+
+  queryAttributes(body) {
+    return this._query("attributes?fields=attributeUuid,name,jsonName,description,schema,scopes,pinned,sequence", body);
+  }
+
+  getEntityAttributes(entityUuid) {
+    return this._get(`entity/${entityUuid}/attributes`);
+  }
+
+  setEntityAttributes(entityUuid, attributes) {
+    return this._patch(`entity/${entityUuid}/attributes`, { attributes });
+  }
+
+  queryEntityAttributes(body) {
+    return this._query("entity/attributes?fields=attributeUuid,entityUuid,jsonName,data", body);
+  }
+
+  // ── Distribution profiles ─────────────────────────────────────────────────
+
+  queryDistributionProfiles(body) {
+    return this._query("distribution-profiles?fields=profileUuid,name,entityUuid", body);
+  }
+
   // ── Surveys ────────────────────────────────────────────────────────────────
 
   listSurveys() {
     return this._get("survey");
+  }
+
+  querySurveys(body) {
+    return this._query("surveys?fields=surveyUuid,name,active,createdAt,questionUuids", body);
   }
 
   // ── Locations (entities) ───────────────────────────────────────────────────
@@ -161,6 +282,14 @@ export class BowimiClient {
     return this._post("locations", data);
   }
 
+  updateLocation(entityUuid, data) {
+    return this._patch(`locations/${entityUuid}`, data);
+  }
+
+  deleteLocation(entityUuid) {
+    return this._delete(`locations/${entityUuid}`);
+  }
+
   // ── Tasks ──────────────────────────────────────────────────────────────────
 
   getTaskSummary(userUuid) {
@@ -172,6 +301,14 @@ export class BowimiClient {
    */
   createTask(data) {
     return this._post("tasks", data);
+  }
+
+  updateTask(taskUuid, data) {
+    return this._patch(`tasks/${taskUuid}`, data);
+  }
+
+  deleteTask(taskUuid) {
+    return this._delete(`tasks/${taskUuid}`);
   }
 
   // ── Orders ─────────────────────────────────────────────────────────────────
@@ -194,6 +331,21 @@ export class BowimiClient {
     return this._post("orders", data);
   }
 
+  queryOrders(body) {
+    return this._query(
+      "orders?fields=orderUuid,entityUuid,createdAt,orderedAt,items,brandStatus,distributorStatus,origin,distributorName,accountNumber,createdBy",
+      body
+    );
+  }
+
+  updateOrder(orderUuid, data) {
+    return this._patch(`orders/${orderUuid}`, data);
+  }
+
+  deleteOrder(orderUuid) {
+    return this._delete(`orders/${orderUuid}`);
+  }
+
   // ── Products ───────────────────────────────────────────────────────────────
 
   listProducts() {
@@ -211,6 +363,22 @@ export class BowimiClient {
     return this._post("products", data);
   }
 
+  queryProducts(body) {
+    return this._query("products?fields=productUuid,name,sku,ean,description,rangeIds,tagUuids", body);
+  }
+
+  updateProduct(productUuid, data) {
+    return this._patch(`products/${productUuid}`, data);
+  }
+
+  deleteProduct(productUuid) {
+    return this._delete(`products/${productUuid}`);
+  }
+
+  queryProductCases(body) {
+    return this._query("product-cases?fields=caseId,name,productUuid,profileUuid,caseSize,price,sku", body);
+  }
+
   // ── Companies ──────────────────────────────────────────────────────────────
 
   listCompanyUuids() {
@@ -222,6 +390,18 @@ export class BowimiClient {
    */
   createCompany(data) {
     return this._post("companies", data);
+  }
+
+  queryCompanies(body) {
+    return this._query("companies?fields=entityUuid,name,accountNumber,domain,isDistributor,isPrimaryCompany,tagUuids", body);
+  }
+
+  updateCompany(entityUuid, data) {
+    return this._patch(`companies/${entityUuid}`, data);
+  }
+
+  deleteCompany(entityUuid) {
+    return this._delete(`companies/${entityUuid}`);
   }
 
   // ── Contacts ───────────────────────────────────────────────────────────────

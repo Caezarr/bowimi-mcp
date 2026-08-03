@@ -1438,6 +1438,631 @@ Parameters:
   }
 );
 
+// ── Users (extended) ──────────────────────────────────────────────────────
+
+server.tool(
+  "query_users",
+  `List all users with pagination.
+
+Returns {items: [{userUuid, name, friendlyName, emailAddress, enabled, roleUuids, owner}], total}.
+
+Parameters:
+- limit: 1–100 (default 50)
+- offset: for pagination`,
+  {
+    limit: z.number().int().min(1).max(100).default(50),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ limit, offset }) => {
+    const data = await client.queryUsers({ limit, offset });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "update_user",
+  "Update a user's properties (name, friendlyName, roleUuids, enabled).",
+  {
+    userUuid: z.string().describe("User UUID"),
+    name: z.string().optional(),
+    friendlyName: z.string().optional(),
+    enabled: z.boolean().optional(),
+    roleUuids: z.array(z.string()).optional(),
+  },
+  async ({ userUuid, ...data }) => {
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
+    const result = await client.updateUser(userUuid, payload);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_user",
+  "Delete a user by UUID.",
+  { userUuid: z.string() },
+  async ({ userUuid }) => {
+    const result = await client.deleteUser(userUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// ── Tags ───────────────────────────────────────────────────────────────────
+
+server.tool(
+  "query_tags",
+  `List all tags with pagination.
+
+Returns {items: [{tagUuid, name, colour, groupName, tagGroupUuid, tagIndex}], total}.
+
+Parameters:
+- limit: 1–100 (default 100)
+- offset: for pagination`,
+  {
+    limit: z.number().int().min(1).max(100).default(100),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ limit, offset }) => {
+    const data = await client.queryTags({ limit, offset });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "update_tag",
+  "Update a tag (name, colour, tagGroupUuid).",
+  {
+    tagUuid: z.string(),
+    name: z.string().optional(),
+    colour: z.string().optional(),
+    tagGroupUuid: z.string().optional(),
+  },
+  async ({ tagUuid, ...data }) => {
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
+    const result = await client.updateTag(tagUuid, payload);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_tag",
+  "Delete a tag by UUID.",
+  { tagUuid: z.string() },
+  async ({ tagUuid }) => {
+    const result = await client.deleteTag(tagUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// ── Tag groups ─────────────────────────────────────────────────────────────
+
+server.tool(
+  "query_tag_groups",
+  `List all tag groups.
+
+Returns {items: [{tagGroupUuid, name, index, pipeline, scopes}], total}.`,
+  {
+    limit: z.number().int().min(1).max(100).default(100),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ limit, offset }) => {
+    const data = await client.queryTagGroups({ limit, offset });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "create_tag_group",
+  "Create a new tag group.",
+  {
+    name: z.string(),
+    index: z.number().int().optional(),
+    pipeline: z.boolean().optional(),
+    scopes: z.array(z.string()).optional(),
+  },
+  async (data) => {
+    const result = await client.createTagGroup(data);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "update_tag_group",
+  "Update a tag group (name, index, pipeline, scopes).",
+  {
+    tagGroupUuid: z.string(),
+    name: z.string().optional(),
+    index: z.number().int().optional(),
+    pipeline: z.boolean().optional(),
+    scopes: z.array(z.string()).optional(),
+  },
+  async ({ tagGroupUuid, ...data }) => {
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
+    const result = await client.updateTagGroup(tagGroupUuid, payload);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_tag_group",
+  "Delete a tag group by UUID.",
+  { tagGroupUuid: z.string() },
+  async ({ tagGroupUuid }) => {
+    const result = await client.deleteTagGroup(tagGroupUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// ── Roles ─────────────────────────────────────────────────────────────────
+
+server.tool(
+  "query_roles",
+  "List all roles with their permission keys.",
+  {
+    limit: z.number().int().min(1).max(100).default(100),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ limit, offset }) => {
+    const data = await client.queryRoles({ limit, offset });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "create_role",
+  "Create a new role with a set of permission keys.",
+  {
+    name: z.string(),
+    permissionKeys: z.array(z.string()).optional(),
+  },
+  async (data) => {
+    const result = await client.createRole(data);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "update_role",
+  "Update a role (name, permissionKeys).",
+  {
+    roleUuid: z.string(),
+    name: z.string().optional(),
+    permissionKeys: z.array(z.string()).optional(),
+  },
+  async ({ roleUuid, ...data }) => {
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
+    const result = await client.updateRole(roleUuid, payload);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_role",
+  "Delete a role by UUID.",
+  { roleUuid: z.string() },
+  async ({ roleUuid }) => {
+    const result = await client.deleteRole(roleUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// ── Teams ─────────────────────────────────────────────────────────────────
+
+server.tool(
+  "query_teams",
+  "List all teams.",
+  {
+    limit: z.number().int().min(1).max(100).default(100),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ limit, offset }) => {
+    const data = await client.queryTeams({ limit, offset });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "create_team",
+  "Create a new team.",
+  {
+    name: z.string(),
+    shortName: z.string().optional(),
+    colour: z.string().optional(),
+  },
+  async (data) => {
+    const result = await client.createTeam(data);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "update_team",
+  "Update a team (name, shortName, colour).",
+  {
+    teamUuid: z.string(),
+    name: z.string().optional(),
+    shortName: z.string().optional(),
+    colour: z.string().optional(),
+  },
+  async ({ teamUuid, ...data }) => {
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
+    const result = await client.updateTeam(teamUuid, payload);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_team",
+  "Delete a team by UUID.",
+  { teamUuid: z.string() },
+  async ({ teamUuid }) => {
+    const result = await client.deleteTeam(teamUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_team_members",
+  "Get members of a team.",
+  { teamUuid: z.string() },
+  async ({ teamUuid }) => {
+    const data = await client.getTeamMembers(teamUuid);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "add_team_member",
+  "Add a user to a team.",
+  {
+    teamUuid: z.string(),
+    userUuid: z.string(),
+  },
+  async ({ teamUuid, userUuid }) => {
+    const result = await client.addTeamMember(teamUuid, userUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "remove_team_member",
+  "Remove a user from a team.",
+  {
+    teamUuid: z.string(),
+    userUuid: z.string(),
+  },
+  async ({ teamUuid, userUuid }) => {
+    const result = await client.removeTeamMember(teamUuid, userUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// ── Attributes ────────────────────────────────────────────────────────────
+
+server.tool(
+  "query_attributes",
+  `List all custom attribute definitions.
+
+Returns {items: [{attributeUuid, name, jsonName, description, schema, scopes, pinned, sequence}], total}.`,
+  {
+    limit: z.number().int().min(1).max(100).default(100),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ limit, offset }) => {
+    const data = await client.queryAttributes({ limit, offset });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_entity_attributes",
+  "Get custom attribute values for a location/entity.",
+  { entityUuid: z.string() },
+  async ({ entityUuid }) => {
+    const data = await client.getEntityAttributes(entityUuid);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "set_entity_attributes",
+  "Set custom attribute values for a location/entity. Pass an array of {attributeUuid, data} objects.",
+  {
+    entityUuid: z.string(),
+    attributes: z.array(z.object({
+      attributeUuid: z.string(),
+      data: z.any(),
+    })),
+  },
+  async ({ entityUuid, attributes }) => {
+    const result = await client.setEntityAttributes(entityUuid, attributes);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "query_entity_attributes",
+  "Query attribute values across multiple entities.",
+  {
+    entityUuids: z.array(z.string()).optional(),
+    attributeUuids: z.array(z.string()).optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ entityUuids, attributeUuids, limit, offset }) => {
+    const body = { limit, offset };
+    if (entityUuids?.length) body.entityUuids = entityUuids;
+    if (attributeUuids?.length) body.attributeUuids = attributeUuids;
+    const data = await client.queryEntityAttributes(body);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+// ── Distribution profiles ──────────────────────────────────────────────────
+
+server.tool(
+  "query_distribution_profiles",
+  `List distribution profiles (price lists / assortment configs).
+
+Returns {items: [{profileUuid, name, entityUuid}], total}.`,
+  {
+    limit: z.number().int().min(1).max(100).default(100),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ limit, offset }) => {
+    const data = await client.queryDistributionProfiles({ limit, offset });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+// ── Surveys (paginated) ────────────────────────────────────────────────────
+
+server.tool(
+  "query_surveys",
+  `List all surveys with pagination.
+
+Returns {items: [{surveyUuid, name, active, createdAt, questionUuids}], total}.`,
+  {
+    limit: z.number().int().min(1).max(100).default(100),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ limit, offset }) => {
+    const data = await client.querySurveys({ limit, offset });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+// ── Locations (mutations) ──────────────────────────────────────────────────
+
+server.tool(
+  "update_location",
+  "Update a location's properties (name, address, notes, tagUuids, etc.).",
+  {
+    entityUuid: z.string(),
+    name: z.string().optional(),
+    address: z.string().optional(),
+    notes: z.string().optional(),
+    tagUuids: z.array(z.string()).optional(),
+    accountNumber: z.string().optional(),
+  },
+  async ({ entityUuid, ...data }) => {
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
+    const result = await client.updateLocation(entityUuid, payload);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_location",
+  "Delete a location/entity by UUID.",
+  { entityUuid: z.string() },
+  async ({ entityUuid }) => {
+    const result = await client.deleteLocation(entityUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// ── Tasks (mutations) ─────────────────────────────────────────────────────
+
+server.tool(
+  "update_task",
+  `Update a task. Use to resolve/close a task or change its properties.
+
+To resolve: set status to "resolved" or set resolvedAt to current ISO timestamp.`,
+  {
+    taskUuid: z.string(),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    status: z.string().optional().describe('"open" or "resolved"'),
+    dueDate: z.string().optional().describe("ISO 8601 date"),
+    allocatedUserUuids: z.array(z.string()).optional(),
+  },
+  async ({ taskUuid, ...data }) => {
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
+    const result = await client.updateTask(taskUuid, payload);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_task",
+  "Delete a task by UUID.",
+  { taskUuid: z.string() },
+  async ({ taskUuid }) => {
+    const result = await client.deleteTask(taskUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// ── Orders ─────────────────────────────────────────────────────────────────
+
+server.tool(
+  "query_orders",
+  `List orders with filters and pagination.
+
+Returns {items: [{orderUuid, entityUuid, createdAt, orderedAt, items, brandStatus, distributorStatus, origin, distributorName, accountNumber, createdBy}], total}.
+
+Parameters:
+- entityUuids: filter by location(s)
+- orderUuids: fetch specific orders
+- limit: 1–100 (default 50)
+- offset: for pagination`,
+  {
+    entityUuids: z.array(z.string()).optional(),
+    orderUuids: z.array(z.string()).optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ entityUuids, orderUuids, limit, offset }) => {
+    const body = { limit, offset };
+    if (entityUuids?.length) body.entityUuids = entityUuids;
+    if (orderUuids?.length) body.orderUuids = orderUuids;
+    const data = await client.queryOrders(body);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "update_order",
+  "Update an order (brandStatus, distributorStatus, notes).",
+  {
+    orderUuid: z.string(),
+    brandStatus: z.string().optional(),
+    distributorStatus: z.string().optional(),
+    brandNotes: z.string().optional(),
+    distributorNotes: z.string().optional(),
+  },
+  async ({ orderUuid, ...data }) => {
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
+    const result = await client.updateOrder(orderUuid, payload);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_order",
+  "Delete an order by UUID.",
+  { orderUuid: z.string() },
+  async ({ orderUuid }) => {
+    const result = await client.deleteOrder(orderUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// ── Products ───────────────────────────────────────────────────────────────
+
+server.tool(
+  "query_products",
+  `List products with pagination.
+
+Returns {items: [{productUuid, name, sku, ean, description, rangeIds, tagUuids}], total}.`,
+  {
+    limit: z.number().int().min(1).max(100).default(100),
+    offset: z.number().int().min(0).default(0),
+    searchTerm: z.string().optional(),
+  },
+  async ({ limit, offset, searchTerm }) => {
+    const body = { limit, offset };
+    if (searchTerm) body.searchTerm = searchTerm;
+    const data = await client.queryProducts(body);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "update_product",
+  "Update a product (name, sku, description, tagUuids).",
+  {
+    productUuid: z.string(),
+    name: z.string().optional(),
+    sku: z.string().optional(),
+    description: z.string().optional(),
+    tagUuids: z.array(z.string()).optional(),
+  },
+  async ({ productUuid, ...data }) => {
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
+    const result = await client.updateProduct(productUuid, payload);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_product",
+  "Delete a product by UUID.",
+  { productUuid: z.string() },
+  async ({ productUuid }) => {
+    const result = await client.deleteProduct(productUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "query_product_cases",
+  `List product cases (pack sizes / price configurations).
+
+Returns {items: [{caseId, name, productUuid, profileUuid, caseSize, price, sku}], total}.`,
+  {
+    productUuids: z.array(z.string()).optional(),
+    profileUuids: z.array(z.string()).optional(),
+    limit: z.number().int().min(1).max(100).default(100),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ productUuids, profileUuids, limit, offset }) => {
+    const body = { limit, offset };
+    if (productUuids?.length) body.productUuids = productUuids;
+    if (profileUuids?.length) body.profileUuids = profileUuids;
+    const data = await client.queryProductCases(body);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+// ── Companies ──────────────────────────────────────────────────────────────
+
+server.tool(
+  "query_companies",
+  `List companies/distributors with pagination.
+
+Returns {items: [{entityUuid, name, accountNumber, domain, isDistributor, isPrimaryCompany, tagUuids}], total}.`,
+  {
+    searchTerm: z.string().optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    offset: z.number().int().min(0).default(0),
+  },
+  async ({ searchTerm, limit, offset }) => {
+    const body = { limit, offset };
+    if (searchTerm) body.searchTerm = searchTerm;
+    const data = await client.queryCompanies(body);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "update_company",
+  "Update a company/distributor (name, accountNumber, domain, notes, tagUuids).",
+  {
+    entityUuid: z.string(),
+    name: z.string().optional(),
+    accountNumber: z.string().optional(),
+    domain: z.string().optional(),
+    notes: z.string().optional(),
+    tagUuids: z.array(z.string()).optional(),
+  },
+  async ({ entityUuid, ...data }) => {
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
+    const result = await client.updateCompany(entityUuid, payload);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_company",
+  "Delete a company by UUID.",
+  { entityUuid: z.string() },
+  async ({ entityUuid }) => {
+    const result = await client.deleteCompany(entityUuid);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
 // ── Debug (temp) ───────────────────────────────────────────────────────────
 
 server.tool(
