@@ -13,7 +13,7 @@ The key format is `subdomain:longkey`.
 ### 2. Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/bowimi-mcp
+git clone https://github.com/Caezarr/bowimi-mcp
 cd bowimi-mcp
 npm install
 ```
@@ -40,6 +40,8 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 Restart Claude Desktop. The Bowimi tools will appear.
 
 ### Alternative: email/password auth
+
+Prefer the API key. Email/password stores a reusable session cookie in the MCP process — use it only on a machine you control, never in a shared config file.
 
 ```json
 "env": {
@@ -142,11 +144,11 @@ Bowimi uses non-standard HTTP methods: `QUERY` (read with body) and `LIST` in ad
 
 ## Known limitations
 
-- **Location search** (`location/map` endpoint) returns a server error — use `get_route` to get your assigned stops, then `get_location` with specific UUIDs.
-- **Activity feed** (`activity` endpoint) returns a server error — use `get_visit_summary` and `get_insights` instead.
+- **Location search** (`location/map` endpoint) returns a server error — use `get_route` to get your assigned stops, then `get_location` with specific UUIDs. Tracked in #1.
+- **Activity feed** (`activity` endpoint) returns a server error — use `get_visit_summary` and `get_insights` instead. Tracked in #1.
 - **Task listing** requires task UUIDs (no filter-based list) — use `get_task_summary` for counts.
 - **Roles** endpoint requires admin permissions — not available with field-sales API keys.
 
 ## License
 
-MIT
+MIT. See [LICENSE](./LICENSE).
