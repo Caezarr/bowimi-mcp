@@ -1,7 +1,7 @@
 {
   "name": "bowimi-mcp",
-  "version": "1.6.0",
-  "description": "MCP server for Bowimi field sales CRM",
+  "version": "1.6.1",
+  "description": "MCP server for Bowimi field sales CRM — connect Claude to your routes, locations, contacts, orders and more",
   "type": "module",
   "bin": {
     "bowimi-mcp": "./src/index.js"
@@ -10,6 +10,33 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Caezarr/bowimi-mcp.git"
+  },
+  "homepage": "https://github.com/Caezarr/bowimi-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/Caezarr/bowimi-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "bowimi",
+    "crm",
+    "field-sales",
+    "claude",
+    "model-context-protocol"
+  ],
+  "author": "Gabriel Rance",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^3.22.0"
