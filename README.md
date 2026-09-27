@@ -149,6 +149,14 @@ Bowimi uses non-standard HTTP methods: `QUERY` (read with body) and `LIST` in ad
 - **Task listing** requires task UUIDs (no filter-based list) — use `get_task_summary` for counts.
 - **Roles** endpoint requires admin permissions — not available with field-sales API keys.
 
+## Community
+
+- **Code of Conduct**: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) — Contributor Covenant 2.1
+- **Contributing**: [CONTRIBUTING.md](./CONTRIBUTING.md) — Guidelines for contributors
+- **Security**: [SECURITY.md](./SECURITY.md) — Security policy and vulnerability reporting
+- **Funding**: [.github/FUNDING.yml](./.github/FUNDING.yml) — Support this project
+- **Tool Reference**: [docs/TOOLS.md](./docs/TOOLS.md) — Complete MCP tools catalog
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).
