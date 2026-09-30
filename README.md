@@ -151,11 +151,12 @@ Bowimi uses non-standard HTTP methods: `QUERY` (read with body) and `LIST` in ad
 
 ## Community
 
+- **Support**: [SUPPORT.md](./SUPPORT.md) — Bug reports and getting help
 - **Code of Conduct**: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) — Contributor Covenant 2.1
 - **Contributing**: [CONTRIBUTING.md](./CONTRIBUTING.md) — Guidelines for contributors
 - **Security**: [SECURITY.md](./SECURITY.md) — Security policy and vulnerability reporting
 - **Funding**: [.github/FUNDING.yml](./.github/FUNDING.yml) — Support this project
-- **Tool Reference**: [docs/TOOLS.md](./docs/TOOLS.md) — Complete MCP tools catalog
+- **Tool Reference**: [docs/TOOLS.md](./docs/TOOLS.md) — Complete MCP tools catalog ([operator view](./docs/TOOL-CATALOG.md))
 
 ## License
 
