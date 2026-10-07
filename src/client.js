@@ -78,13 +78,23 @@ export class BowimiClient {
       let msg = text;
       try {
         const j = JSON.parse(text);
-        msg = j.message || JSON.stringify(j);
+        // Handle Bowimi error envelope: {ErrorType, Message, Details}
+        if (j.ErrorType && j.Message) {
+          msg = `${j.ErrorType}: ${j.Message}`;
+        } else {
+          msg = j.message || JSON.stringify(j);
+        }
       } catch {}
       throw new Error(`Bowimi API ${path} → ${res.status}: ${msg}`);
     }
     if (!text) return null;
     try {
-      return JSON.parse(text);
+      const parsed = JSON.parse(text);
+      // Unwrap Bowimi response envelope: {Data: ..., included?: ...}
+      if (parsed && typeof parsed === "object" && "Data" in parsed) {
+        return parsed.Data;
+      }
+      return parsed;
     } catch {
       return text;
     }
@@ -349,7 +359,7 @@ export class BowimiClient {
   // ── Products ───────────────────────────────────────────────────────────────
 
   listProducts() {
-    return this._query("product", {});
+    return this._list("product", {});
   }
 
   getProductDetails(productUuids) {
