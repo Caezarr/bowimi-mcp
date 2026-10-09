@@ -54,6 +54,8 @@ Prefer the API key. Email/password stores a reusable session cookie in the MCP p
 ## Available tools
 
 > **Credential handling:** All tools require authentication. See [SECURITY.md](./SECURITY.md) for best practices on managing API keys and credentials.
+>
+> **Technical reference:** For complete schemas and operator documentation, see [docs/TOOLS.md](./docs/TOOLS.md) and [docs/TOOL-CATALOG.md](./docs/TOOL-CATALOG.md).
 
 ### Complete MCP tools catalog
 
@@ -149,11 +151,12 @@ Prefer the API key. Email/password stores a reusable session cookie in the MCP p
 
 ## Example prompts
 
-- *"Show me my route for today"*
-- *"Which stops haven't been visited in 90+ days?"*
-- *"What are the task and order counts this week?"*
-- *"Get the contacts for location UUID abc-123"*
-- *"List all products and their UUIDs"*
+- *"Show me my route for today"* → `get_route`, `get_route_summary`
+- *"Which stops haven't been visited in 90+ days?"* → `get_route` with `notVisitedSince`
+- *"What are the task and order counts this week?"* → `get_task_summary`, `get_order_summary`
+- *"Get the contacts for location UUID abc-123"* → `get_location_contacts`
+- *"List all products and their UUIDs"* → `list_products`, `query_products`
+- *"Show me weekly team performance"* → `get_weekly_report`, `get_team_overview`
 
 ## Architecture
 
