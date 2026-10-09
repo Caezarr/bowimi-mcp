@@ -53,73 +53,99 @@ Prefer the API key. Email/password stores a reusable session cookie in the MCP p
 
 ## Available tools
 
-### Account & users
-| Tool | Description |
-|------|-------------|
-| `get_app_info` | Account info, brand details, permission keys |
-| `list_users` | All users in the account |
-| `get_current_user` | Currently authenticated user |
-| `invite_user` | Invite a new user (requires email + roleUuid) |
+> **Credential handling:** All tools require authentication. See [SECURITY.md](./SECURITY.md) for best practices on managing API keys and credentials.
 
-### Tags & surveys
-| Tool | Description |
-|------|-------------|
-| `list_tags` | All tag groups and tags (filter: `location` or `company`) |
-| `create_tag` | Create a tag in an existing group |
-| `list_surveys` | All surveys and their questions |
+### Complete MCP tools catalog
 
-### Locations (entities)
-| Tool | Description |
-|------|-------------|
-| `get_location` | Full details for one or more locations by UUID |
-| `get_location_tags` | Tags assigned to locations |
-| `get_location_products` | Products listed at locations |
-| `get_location_contacts` | All contacts for a location |
-| `create_location` | Create a new location/outlet |
+| Tool | Purpose | Required env | Example arg |
+|------|---------|--------------|-------------|
+| `get_app_info` | Account info, brand details, permission keys | `BOWIMI_SUBDOMAIN` + auth | — |
+| `list_users` | All users in the account | `BOWIMI_SUBDOMAIN` + auth | — |
+| `get_current_user` | Currently authenticated user | `BOWIMI_SUBDOMAIN` + auth | — |
+| `invite_user` | Invite a new user | `BOWIMI_SUBDOMAIN` + auth | `{"email": "rep@company.com", "roleUuid": "abc-123"}` |
+| `list_tags` | Tag groups and tags | `BOWIMI_SUBDOMAIN` + auth | `{"intent": "location"}` |
+| `create_tag` | Create a tag in a group | `BOWIMI_SUBDOMAIN` + auth | `{"name": "New Tag", "tagGroupUuid": "abc-123"}` |
+| `list_surveys` | All surveys and questions | `BOWIMI_SUBDOMAIN` + auth | — |
+| `get_location` | Full location details by UUID | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"]}` |
+| `get_location_tags` | Tags assigned to locations | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"]}` |
+| `get_location_products` | Products at locations | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"]}` |
+| `create_location` | Create a new location/outlet | `BOWIMI_SUBDOMAIN` + auth | `{"name": "Cafe", "address": "Main St", "coordinates": {"lat": 50.8, "lng": 4.3}}` |
+| `get_task_summary` | Task counts by status | `BOWIMI_SUBDOMAIN` + auth | — |
+| `create_task` | Create a task | `BOWIMI_SUBDOMAIN` + auth | `{"title": "Follow up", "entityUuid": "abc-123"}` |
+| `get_order_summary` | Order totals by period | `BOWIMI_SUBDOMAIN` + auth | — |
+| `get_orders` | Order details by UUID | `BOWIMI_SUBDOMAIN` + auth | `{"orderUuids": ["abc-123"]}` |
+| `create_order` | Place a new order | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123", "profileUuid": "def-456", "origin": "field-sales", "items": [{"productUuid": "p1", "quantity": 10}]}` |
+| `list_products` | All products | `BOWIMI_SUBDOMAIN` + auth | — |
+| `get_product_details` | Product details by UUID | `BOWIMI_SUBDOMAIN` + auth | `{"productUuids": ["abc-123"]}` |
+| `create_product` | Create a product | `BOWIMI_SUBDOMAIN` + auth | `{"name": "Widget", "sku": "W-001"}` |
+| `list_companies` | Company/RTM UUIDs | `BOWIMI_SUBDOMAIN` + auth | — |
+| `create_company` | Create a company/RTM | `BOWIMI_SUBDOMAIN` + auth | `{"name": "Acme Corp"}` |
+| `get_contacts` | Contact details by UUID | `BOWIMI_SUBDOMAIN` + auth | `{"contactUuids": ["abc-123"]}` |
+| `create_or_update_contact` | Create/update contact | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123", "name": "John Doe", "email": "john@company.com"}` |
+| `get_visit_summary` | Today's visit summary | `BOWIMI_SUBDOMAIN` + auth | — |
+| `get_route` | Current user's planned stops | `BOWIMI_SUBDOMAIN` + auth | `{"includeDetails": true, "notVisitedSince": "2026-07-01"}` |
+| `get_location_contacts` | Contacts for a location | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123"}` |
+| `get_location_task_status` | Task status per location | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"]}` |
+| `get_insights` | Combined visits/tasks/orders | `BOWIMI_SUBDOMAIN` + auth | `{"userUuid": "abc-123"}` |
+| `list_shortcuts` | Saved location shortcuts | `BOWIMI_SUBDOMAIN` + auth | — |
+| `get_location_full_profile` | Complete location profile | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123"}` |
+| `get_route_summary` | Fast route overview | `BOWIMI_SUBDOMAIN` + auth | — |
+| `get_route_stops_with_tasks` | Route stops with pending tasks | `BOWIMI_SUBDOMAIN` + auth | `{"includeCompleted": false}` |
+| `find_route_stops_by_tag` | Find stops by tag | `BOWIMI_SUBDOMAIN` + auth | `{"tagName": "horeca"}` |
+| `get_team_overview` | Task/order stats per rep | `BOWIMI_SUBDOMAIN` + auth | — |
+| `get_visit_counts` | Visit counts by period | `BOWIMI_SUBDOMAIN` + auth | `{"period": "this_week"}` |
+| `get_introductions` | Product introductions | `BOWIMI_SUBDOMAIN` + auth | `{"from": "2026-07-01", "to": "2026-07-31"}` |
+| `get_weekly_report` | Full weekly recap | `BOWIMI_SUBDOMAIN` + auth | `{"weeksAgo": 0}` |
+| `get_activity` | Activity feed (visits/surveys) | `BOWIMI_SUBDOMAIN` + auth | `{"type": "survey", "from": "2026-07-01"}` |
+| `get_survey` | Survey definition | `BOWIMI_SUBDOMAIN` + auth | `{"surveyUuid": "abc-123"}` |
+| `get_survey_response` | Survey response answers | `BOWIMI_SUBDOMAIN` + auth | `{"responseUuid": "abc-123"}` |
+| `list_survey_responses` | Survey responses with filters | `BOWIMI_SUBDOMAIN` + auth | `{"surveyUuids": ["abc-123"], "limit": 50}` |
+| `list_locations` | Locations with search | `BOWIMI_SUBDOMAIN` + auth | `{"searchTerm": "cafe", "limit": 50}` |
+| `list_tasks` | Tasks with filters | `BOWIMI_SUBDOMAIN` + auth | `{"resolved": false, "limit": 50}` |
+| `query_users` | Users with pagination | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 50}` |
+| `update_user` | Update user properties | `BOWIMI_SUBDOMAIN` + auth | `{"userUuid": "abc-123", "name": "New Name"}` |
+| `delete_user` | Delete a user | `BOWIMI_SUBDOMAIN` + auth | `{"userUuid": "abc-123"}` |
+| `query_tags` | Tags with pagination | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
+| `update_tag` | Update tag properties | `BOWIMI_SUBDOMAIN` + auth | `{"tagUuid": "abc-123", "name": "Updated"}` |
+| `delete_tag` | Delete a tag | `BOWIMI_SUBDOMAIN` + auth | `{"tagUuid": "abc-123"}` |
+| `query_tag_groups` | Tag groups list | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
+| `create_tag_group` | Create tag group | `BOWIMI_SUBDOMAIN` + auth | `{"name": "New Group"}` |
+| `update_tag_group` | Update tag group | `BOWIMI_SUBDOMAIN` + auth | `{"tagGroupUuid": "abc-123", "name": "Updated"}` |
+| `delete_tag_group` | Delete tag group | `BOWIMI_SUBDOMAIN` + auth | `{"tagGroupUuid": "abc-123"}` |
+| `query_roles` | Roles with permissions | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
+| `create_role` | Create a role | `BOWIMI_SUBDOMAIN` + auth | `{"name": "Sales Rep", "permissionKeys": ["read"]}` |
+| `update_role` | Update role | `BOWIMI_SUBDOMAIN` + auth | `{"roleUuid": "abc-123", "name": "Updated"}` |
+| `delete_role` | Delete a role | `BOWIMI_SUBDOMAIN` + auth | `{"roleUuid": "abc-123"}` |
+| `query_teams` | Teams list | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
+| `create_team` | Create a team | `BOWIMI_SUBDOMAIN` + auth | `{"name": "North Region"}` |
+| `update_team` | Update team | `BOWIMI_SUBDOMAIN` + auth | `{"teamUuid": "abc-123", "name": "Updated"}` |
+| `delete_team` | Delete a team | `BOWIMI_SUBDOMAIN` + auth | `{"teamUuid": "abc-123"}` |
+| `get_team_members` | Team members | `BOWIMI_SUBDOMAIN` + auth | `{"teamUuid": "abc-123"}` |
+| `add_team_member` | Add user to team | `BOWIMI_SUBDOMAIN` + auth | `{"teamUuid": "abc-123", "userUuid": "def-456"}` |
+| `remove_team_member` | Remove user from team | `BOWIMI_SUBDOMAIN` + auth | `{"teamUuid": "abc-123", "userUuid": "def-456"}` |
+| `query_attributes` | Custom attribute definitions | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
+| `get_entity_attributes` | Attribute values for entity | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123"}` |
+| `set_entity_attributes` | Set entity attributes | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123", "attributes": [{"attributeUuid": "a1", "data": "value"}]}` |
+| `query_entity_attributes` | Query attributes across entities | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"]}` |
+| `query_distribution_profiles` | Distribution profiles | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
+| `query_surveys` | Surveys with pagination | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
+| `update_location` | Update location properties | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123", "name": "Updated"}` |
+| `delete_location` | Delete a location | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123"}` |
+| `update_task` | Update task | `BOWIMI_SUBDOMAIN` + auth | `{"taskUuid": "abc-123", "status": "resolved"}` |
+| `delete_task` | Delete a task | `BOWIMI_SUBDOMAIN` + auth | `{"taskUuid": "abc-123"}` |
+| `query_orders` | Orders with filters | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"], "limit": 50}` |
+| `update_order` | Update order status | `BOWIMI_SUBDOMAIN` + auth | `{"orderUuid": "abc-123", "brandStatus": "confirmed"}` |
+| `delete_order` | Delete an order | `BOWIMI_SUBDOMAIN` + auth | `{"orderUuid": "abc-123"}` |
+| `query_products` | Products with search | `BOWIMI_SUBDOMAIN` + auth | `{"searchTerm": "widget", "limit": 100}` |
+| `update_product` | Update product | `BOWIMI_SUBDOMAIN` + auth | `{"productUuid": "abc-123", "name": "Updated"}` |
+| `delete_product` | Delete a product | `BOWIMI_SUBDOMAIN` + auth | `{"productUuid": "abc-123"}` |
+| `query_product_cases` | Product cases (pack sizes) | `BOWIMI_SUBDOMAIN` + auth | `{"productUuids": ["abc-123"]}` |
+| `query_companies` | Companies with search | `BOWIMI_SUBDOMAIN` + auth | `{"searchTerm": "acme", "limit": 50}` |
+| `update_company` | Update company | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123", "name": "Updated"}` |
+| `delete_company` | Delete a company | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123"}` |
+| `debug_api` | Probe raw Bowimi endpoint | `BOWIMI_SUBDOMAIN` + auth | `{"method": "GET", "path": "entity-visit"}` |
 
-### Route
-| Tool | Description |
-|------|-------------|
-| `get_route` | Current user's planned stops (My Route) with names, addresses, coordinates, last contacted date |
-
-### Tasks
-| Tool | Description |
-|------|-------------|
-| `get_task_summary` | Task counts: available, overdue, today |
-| `create_task` | Create a new task (optionally linked to a location) |
-
-### Orders
-| Tool | Description |
-|------|-------------|
-| `get_order_summary` | Order totals: last month, this month, this week |
-| `get_orders` | Full order details by UUID |
-| `create_order` | Place a new order |
-
-### Products
-| Tool | Description |
-|------|-------------|
-| `list_products` | All products |
-| `get_product_details` | Full product details by UUID |
-| `create_product` | Create a new product |
-
-### Companies
-| Tool | Description |
-|------|-------------|
-| `list_companies` | All company/RTM UUIDs |
-| `create_company` | Create a new company/RTM |
-
-### Contacts
-| Tool | Description |
-|------|-------------|
-| `get_contacts` | Contact details by UUID |
-| `create_or_update_contact` | Create or update a contact on a location or company |
-
-### Activity & insights
-| Tool | Description |
-|------|-------------|
-| `get_visit_summary` | Today's visit summary: done/missed yesterday, remaining today |
-| `get_insights` | Combined dashboard: visits + tasks + orders |
-| `list_shortcuts` | Saved location shortcuts (pre-filtered views) |
+**Auth options:** `BOWIMI_API_KEY` (preferred) or `BOWIMI_EMAIL` + `BOWIMI_PASSWORD`
 
 ## Example prompts
 
