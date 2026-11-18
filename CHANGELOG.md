@@ -5,6 +5,16 @@ All notable changes to `bowimi-mcp` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Server no longer crashes at startup with "Tool get_introductions is already registered"; the superseded listing-based variant was removed and the documented survey-based `get_introductions` kept.
+- Reported server version and update check now read the version from `package.json` (was hard-coded to 1.5.1).
+
+### Changed
+- `src/index.js` split into `server.js`, `tools/<domain>.js`, `schemas.js`, `result.js` and `errors.js`. Tool names, descriptions, inputs and outputs are unchanged.
+- CI now runs the test suite and a `tsc --checkJs` type check.
+
 ## [1.6.1] — 2026-09-02
 
 ### Changed

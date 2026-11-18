@@ -1,6 +1,6 @@
 # Bowimi MCP Tools Reference
 
-Complete inventory of all tools exposed by this MCP server. This reference is generated from `src/index.js` tool registrations.
+Complete inventory of all tools exposed by this MCP server. This reference is generated from the tool registrations in `src/tools/*.js`.
 
 ## Environment Variables
 

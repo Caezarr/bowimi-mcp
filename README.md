@@ -162,10 +162,15 @@ Prefer the API key. Email/password stores a reusable session cookie in the MCP p
 
 ```
 src/
-  index.js   — MCP server (tool definitions)
-  client.js  — Bowimi API client (HTTP methods)
-  auth.js    — Auth: API key or email/password session
+  index.js     — entry point: env config + stdio bootstrap
+  server.js    — createServer(): registers every tool module
+  tools/       — tool definitions, one module per domain
+  client.js    — Bowimi API client (HTTP methods)
+  errors.js    — API error mapping + response envelope parsing
+  auth.js      — Auth: API key or email/password session
 ```
+
+See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the module map, error handling and how to add a tool.
 
 **API base:** `https://{subdomain}.bowimi.com/_api/v4.6.1/`
 

@@ -1,6 +1,6 @@
 # Bowimi MCP — tool catalog (operator view)
 
-High-level map of tools exposed by `src/index.js` so operators know what Claude can touch. Not a substitute for reading the source when adding tools.
+High-level map of tools exposed by `src/tools/*.js` so operators know what Claude can touch. Not a substitute for reading the source when adding tools.
 
 ## Read / overview
 
@@ -34,4 +34,4 @@ Destructive tools (`delete_*`, user invite/update) should only run with explicit
 
 ## Keeping this file honest
 
-When adding/removing a `server.tool(...)` in `src/index.js`, update this catalog in the same PR.
+When adding/removing a `server.tool(...)` in `src/tools/`, update this catalog in the same PR.
