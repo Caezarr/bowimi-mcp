@@ -14,13 +14,15 @@ Configure Claude Desktop (or another MCP host) with `BOWIMI_SUBDOMAIN` + `BOWIMI
 
 ## Development
 
-- Server entry: `src/index.js`
+- Server entry: `src/index.js`; tools live in `src/tools/<domain>.js`
 - HTTP client: `src/client.js`
 - Auth: `src/auth.js`
+- Module map: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 
 ```bash
-npm run dev   # node --watch
+npm run dev    # node --watch
 npm start
+npm run check  # type check + tests (no network)
 ```
 
 ## Pull requests

@@ -5,8 +5,13 @@
  * API base: https://{subdomain}.bowimi.com/_api/v{version}/
  * Methods: GET, POST, QUERY (custom), LIST (custom)
  */
+import { parseSuccessBody, toApiError } from "./errors.js";
 
 export class BowimiClient {
+  /**
+   * @param {import("./auth.js").BowimiAuth} auth
+   * @param {string} [version] Bowimi API version segment.
+   */
   constructor(auth, version = "v4.6.1") {
     this.auth = auth;
     this.version = version;
@@ -72,32 +77,16 @@ export class BowimiClient {
     return this._handle(res, path);
   }
 
+  /**
+   * Turn a fetch Response into parsed data, or throw a BowimiApiError.
+   *
+   * @param {Response} res
+   * @param {string} path
+   */
   async _handle(res, path) {
     const text = await res.text();
-    if (!res.ok) {
-      let msg = text;
-      try {
-        const j = JSON.parse(text);
-        // Handle Bowimi error envelope: {ErrorType, Message, Details}
-        if (j.ErrorType && j.Message) {
-          msg = `${j.ErrorType}: ${j.Message}`;
-        } else {
-          msg = j.message || JSON.stringify(j);
-        }
-      } catch {}
-      throw new Error(`Bowimi API ${path} → ${res.status}: ${msg}`);
-    }
-    if (!text) return null;
-    try {
-      const parsed = JSON.parse(text);
-      // Unwrap Bowimi response envelope: {Data: ..., included?: ...}
-      if (parsed && typeof parsed === "object" && "Data" in parsed) {
-        return parsed.Data;
-      }
-      return parsed;
-    } catch {
-      return text;
-    }
+    if (!res.ok) throw toApiError(path, res.status, text);
+    return parseSuccessBody(text);
   }
 
   // ── App ────────────────────────────────────────────────────────────────────
@@ -286,7 +275,7 @@ export class BowimiClient {
 
   /**
    * Create a location.
-   * @param {{ name: string, address: string, coordinates: {lat: number, lng: number}, ... }} data
+   * @param {{ name: string, address: string, coordinates: {lat: number, lng: number}, [key: string]: unknown }} data
    */
   createLocation(data) {
     return this._post("locations", data);
@@ -335,7 +324,7 @@ export class BowimiClient {
   }
 
   /**
-   * @param {{ entityUuid, profileUuid, origin, items: [{productUuid, quantity}] }} data
+   * @param {{ entityUuid: string, profileUuid: string, origin: string, items: Array<{productUuid: string, quantity: number}>, notes?: string }} data
    */
   createOrder(data) {
     return this._post("orders", data);
