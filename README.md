@@ -1,26 +1,79 @@
 # bowimi-mcp
 
-MCP server for [Bowimi](https://bowimi.com) — the field sales CRM. Connect Claude to your Bowimi account to query routes, locations, contacts, orders, products, and more.
+[![CI](https://github.com/Caezarr/bowimi-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Caezarr/bowimi-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Setup
+An MCP server that lets Claude (or any MCP host) query and update the [Bowimi](https://bowimi.com) field-sales CRM in plain language: routes, locations, contacts, orders, products, tasks, surveys and team reports, exposed as 85 tools.
 
-### 1. Get your API key
+## The problem
 
-In Bowimi: **Settings → Integrations → Zapier → API Key**
+Field-sales teams keep their route plans, points of sale, orders and visit history in a CRM built for forms and dashboards, not questions. A rep who wants "which stops on my route haven't been visited in 90 days, and what did they last order?" has to click through several screens, and a manager who wants a weekly recap per rep exports to a spreadsheet. Generic AI assistants cannot help because they have no access to that data. Bowimi has an API, but it uses non-standard HTTP verbs (`QUERY`, `LIST`) and a response envelope that a model cannot call reliably on its own.
 
-The key format is `subdomain:longkey`.
+## How it solves it
 
-### 2. Install
+`bowimi-mcp` is a thin, stateless stdio adapter between an MCP host and the Bowimi API. Each tool call maps to one or a few Bowimi requests and returns JSON to the model.
 
-```bash
-git clone https://github.com/Caezarr/bowimi-mcp
-cd bowimi-mcp
-npm install
+- **One tool per CRM action, typed.** Every tool has a description written for the model and a zod input schema, so bad arguments are rejected before any HTTP call.
+- **Composite tools for real questions.** Besides 1:1 endpoint tools, some combine calls into answers reps and managers ask for: `get_weekly_report`, `get_team_overview`, `get_route_stops_with_tasks`, `get_location_full_profile`. One failing rep does not fail a team report.
+- **The API's quirks live in one client.** `BowimiClient` wraps the `QUERY` and `LIST` verbs and unwraps the `{ Data }` envelope; errors become `Bowimi API <path> → <status>: <ErrorType>: <Message>` so the model sees what went wrong, never a stack trace.
+- **Testable without an account.** `createServer()` takes the client as a parameter, so the test suite drives the real MCP server against a mocked client with the network disabled.
+- **API key first.** A static Bearer key is preferred; email and password session login is supported for accounts without one.
+
+```text
+MCP host (Claude Desktop, ...) --stdio/JSON-RPC--> index.js -> server.js -> tools/*.js -> BowimiClient --HTTPS--> {subdomain}.bowimi.com/_api/v4.6.1
 ```
 
-### 3. Configure Claude Desktop
+Module map, error handling and how to add a tool: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+## Try it
+
+Requires Node.js 18+.
+
+### Offline, no Bowimi account (about 2 minutes)
+
+```bash
+git clone https://github.com/Caezarr/bowimi-mcp && cd bowimi-mcp
+npm ci
+npm test
+```
+
+Expected output (excerpt):
+
+```text
+# tests 21
+# pass 21
+# fail 0
+```
+
+List the tools the server exposes with the official [MCP Inspector](https://github.com/modelcontextprotocol/inspector) CLI. Dummy credentials are enough: the server only contacts Bowimi when a tool is called.
+
+```bash
+npx -y @modelcontextprotocol/inspector@0.17.2 --cli node src/index.js \
+  -e BOWIMI_SUBDOMAIN=demo -e BOWIMI_API_KEY=demo:offline \
+  --method tools/list 2>/dev/null \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const t=JSON.parse(s).tools;console.log(t.length+" tools");console.log(t.slice(0,4).map(x=>x.name).join("\n")+"\n...")})'
+```
+
+```text
+85 tools
+get_app_info
+list_users
+get_current_user
+invite_user
+...
+```
+
+Drop the final pipe to see every tool's description and JSON input schema. Without credentials the server refuses to start:
+
+```bash
+node src/index.js
+# Required: BOWIMI_SUBDOMAIN + (BOWIMI_API_KEY or BOWIMI_EMAIL+BOWIMI_PASSWORD)   (exit 1)
+```
+
+### With a real Bowimi account
+
+1. In Bowimi, get an API key: **Settings → Integrations → Zapier → API Key**. Its format is `subdomain:longkey`.
+2. Add the server to Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 
 ```json
 {
@@ -37,161 +90,56 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 }
 ```
 
-Restart Claude Desktop. The Bowimi tools will appear.
+3. Restart Claude Desktop and ask, for example:
 
-### Alternative: email/password auth
+| Prompt | Tools the model typically uses |
+|---|---|
+| "Show me my route for today" | `get_route`, `get_route_summary` |
+| "Which stops haven't been visited since July?" | `get_route` with `notVisitedSince` |
+| "Task and order counts this week" | `get_task_summary`, `get_order_summary` |
+| "Weekly team performance" | `get_weekly_report`, `get_team_overview` |
 
-Prefer the API key. Email/password stores a reusable session cookie in the MCP process — use it only on a machine you control, never in a shared config file.
+Email and password (`BOWIMI_EMAIL`, `BOWIMI_PASSWORD`) also work in place of the API key; the server then holds a session cookie in memory, so use it only on a machine you control. See [SECURITY.md](SECURITY.md).
 
-```json
-"env": {
-  "BOWIMI_SUBDOMAIN": "yoursubdomain",
-  "BOWIMI_EMAIL": "you@company.com",
-  "BOWIMI_PASSWORD": "yourpassword"
-}
+## How it works
+
+1. `src/index.js` reads the `BOWIMI_*` variables, builds the auth and client, and serves over stdio. It is the only module with side effects.
+2. `src/server.js` creates the `McpServer` and calls each domain module's `register*Tools`: account, tags, attributes, locations, companies, tasks, orders, products, surveys, route, analytics, debug.
+3. Each tool validates its input with zod, calls `BowimiClient`, and returns pretty-printed JSON via `jsonResult()`.
+4. `BowimiClient` (`src/client.js`) has one method per endpoint and handles `QUERY` and `LIST` alongside `GET/POST/PATCH/DELETE`.
+5. Non-2xx responses become a `BowimiApiError`; the MCP SDK turns it into a tool result with `isError: true`.
+
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Full tool reference with schemas: [docs/TOOLS.md](docs/TOOLS.md) and [docs/TOOL-CATALOG.md](docs/TOOL-CATALOG.md).
+
+## Proof
+
+- `npm test`: 21 `node:test` cases, no network. `test/server.test.js` builds the real server around a mocked client and checks that exactly the expected 85 tools are registered, each with a description and object schema; that arguments are validated before reaching the client; and that API errors come back as `isError` results carrying Bowimi's message. Other suites cover the `QUERY` and `LIST` request contracts with a mocked `fetch`, error-envelope parsing and success-body unwrapping.
+- `npm run typecheck`: `tsc --checkJs` over the JSDoc types.
+- [CI](.github/workflows/ci.yml) runs a syntax check, the type check and the tests on every pull request.
+
+## Limits and status
+
+- Nothing in this repository proves behaviour against the live Bowimi API: tests use mocks, and the commands above were verified offline only. Use a test account first.
+- 34 of the 85 tools write (create, update, delete, invite, set, add, remove), and `debug_api` sends a raw request to any Bowimi endpoint. There is no read-only mode; the API key's own permissions are the only limit, and the MCP host's tool approval is your safeguard.
+- Bowimi's `location/map` and `activity` endpoints returned server errors when last tested, which affects `get_activity` ([issue #1](https://github.com/Caezarr/bowimi-mcp/issues/1), open). Prefer `get_route`, `get_location`, `get_visit_summary` and `get_insights`.
+- Role management needs admin permissions and is not available with field-sales API keys.
+- On startup the server makes one request to `raw.githubusercontent.com` to check for a newer version; it fails silently offline.
+- Not published to npm: run from a clone.
+
+## Development
+
+```bash
+npm ci
+npm test            # node:test, no network
+npm run typecheck   # tsc over JSDoc types
+npm run check       # both
+npm run dev         # node --watch src/index.js (needs BOWIMI_* env)
 ```
 
-## Available tools
+To add a tool, follow the four steps in [docs/ARCHITECTURE.md#adding-a-tool](docs/ARCHITECTURE.md#adding-a-tool).
 
-> **Credential handling:** All tools require authentication. See [SECURITY.md](./SECURITY.md) for best practices on managing API keys and credentials.
->
-> **Technical reference:** For complete schemas and operator documentation, see [docs/TOOLS.md](./docs/TOOLS.md) and [docs/TOOL-CATALOG.md](./docs/TOOL-CATALOG.md).
-
-### Complete MCP tools catalog
-
-| Tool | Purpose | Required env | Example arg |
-|------|---------|--------------|-------------|
-| `get_app_info` | Account info, brand details, permission keys | `BOWIMI_SUBDOMAIN` + auth | — |
-| `list_users` | All users in the account | `BOWIMI_SUBDOMAIN` + auth | — |
-| `get_current_user` | Currently authenticated user | `BOWIMI_SUBDOMAIN` + auth | — |
-| `invite_user` | Invite a new user | `BOWIMI_SUBDOMAIN` + auth | `{"email": "rep@company.com", "roleUuid": "abc-123"}` |
-| `list_tags` | Tag groups and tags | `BOWIMI_SUBDOMAIN` + auth | `{"intent": "location"}` |
-| `create_tag` | Create a tag in a group | `BOWIMI_SUBDOMAIN` + auth | `{"name": "New Tag", "tagGroupUuid": "abc-123"}` |
-| `list_surveys` | All surveys and questions | `BOWIMI_SUBDOMAIN` + auth | — |
-| `get_location` | Full location details by UUID | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"]}` |
-| `get_location_tags` | Tags assigned to locations | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"]}` |
-| `get_location_products` | Products at locations | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"]}` |
-| `create_location` | Create a new location/outlet | `BOWIMI_SUBDOMAIN` + auth | `{"name": "Cafe", "address": "Main St", "coordinates": {"lat": 50.8, "lng": 4.3}}` |
-| `get_task_summary` | Task counts by status | `BOWIMI_SUBDOMAIN` + auth | — |
-| `create_task` | Create a task | `BOWIMI_SUBDOMAIN` + auth | `{"title": "Follow up", "entityUuid": "abc-123"}` |
-| `get_order_summary` | Order totals by period | `BOWIMI_SUBDOMAIN` + auth | — |
-| `get_orders` | Order details by UUID | `BOWIMI_SUBDOMAIN` + auth | `{"orderUuids": ["abc-123"]}` |
-| `create_order` | Place a new order | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123", "profileUuid": "def-456", "origin": "field-sales", "items": [{"productUuid": "p1", "quantity": 10}]}` |
-| `list_products` | All products | `BOWIMI_SUBDOMAIN` + auth | — |
-| `get_product_details` | Product details by UUID | `BOWIMI_SUBDOMAIN` + auth | `{"productUuids": ["abc-123"]}` |
-| `create_product` | Create a product | `BOWIMI_SUBDOMAIN` + auth | `{"name": "Widget", "sku": "W-001"}` |
-| `list_companies` | Company/RTM UUIDs | `BOWIMI_SUBDOMAIN` + auth | — |
-| `create_company` | Create a company/RTM | `BOWIMI_SUBDOMAIN` + auth | `{"name": "Acme Corp"}` |
-| `get_contacts` | Contact details by UUID | `BOWIMI_SUBDOMAIN` + auth | `{"contactUuids": ["abc-123"]}` |
-| `create_or_update_contact` | Create/update contact | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123", "name": "John Doe", "email": "john@company.com"}` |
-| `get_visit_summary` | Today's visit summary | `BOWIMI_SUBDOMAIN` + auth | — |
-| `get_route` | Current user's planned stops | `BOWIMI_SUBDOMAIN` + auth | `{"includeDetails": true, "notVisitedSince": "2026-07-01"}` |
-| `get_location_contacts` | Contacts for a location | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123"}` |
-| `get_location_task_status` | Task status per location | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"]}` |
-| `get_insights` | Combined visits/tasks/orders | `BOWIMI_SUBDOMAIN` + auth | `{"userUuid": "abc-123"}` |
-| `list_shortcuts` | Saved location shortcuts | `BOWIMI_SUBDOMAIN` + auth | — |
-| `get_location_full_profile` | Complete location profile | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123"}` |
-| `get_route_summary` | Fast route overview | `BOWIMI_SUBDOMAIN` + auth | — |
-| `get_route_stops_with_tasks` | Route stops with pending tasks | `BOWIMI_SUBDOMAIN` + auth | `{"includeCompleted": false}` |
-| `find_route_stops_by_tag` | Find stops by tag | `BOWIMI_SUBDOMAIN` + auth | `{"tagName": "horeca"}` |
-| `get_team_overview` | Task/order stats per rep | `BOWIMI_SUBDOMAIN` + auth | — |
-| `get_visit_counts` | Visit counts by period | `BOWIMI_SUBDOMAIN` + auth | `{"period": "this_week"}` |
-| `get_introductions` | Product introductions | `BOWIMI_SUBDOMAIN` + auth | `{"from": "2026-07-01", "to": "2026-07-31"}` |
-| `get_weekly_report` | Full weekly recap | `BOWIMI_SUBDOMAIN` + auth | `{"weeksAgo": 0}` |
-| `get_activity` | Activity feed (visits/surveys) | `BOWIMI_SUBDOMAIN` + auth | `{"type": "survey", "from": "2026-07-01"}` |
-| `get_survey` | Survey definition | `BOWIMI_SUBDOMAIN` + auth | `{"surveyUuid": "abc-123"}` |
-| `get_survey_response` | Survey response answers | `BOWIMI_SUBDOMAIN` + auth | `{"responseUuid": "abc-123"}` |
-| `list_survey_responses` | Survey responses with filters | `BOWIMI_SUBDOMAIN` + auth | `{"surveyUuids": ["abc-123"], "limit": 50}` |
-| `list_locations` | Locations with search | `BOWIMI_SUBDOMAIN` + auth | `{"searchTerm": "cafe", "limit": 50}` |
-| `list_tasks` | Tasks with filters | `BOWIMI_SUBDOMAIN` + auth | `{"resolved": false, "limit": 50}` |
-| `query_users` | Users with pagination | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 50}` |
-| `update_user` | Update user properties | `BOWIMI_SUBDOMAIN` + auth | `{"userUuid": "abc-123", "name": "New Name"}` |
-| `delete_user` | Delete a user | `BOWIMI_SUBDOMAIN` + auth | `{"userUuid": "abc-123"}` |
-| `query_tags` | Tags with pagination | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
-| `update_tag` | Update tag properties | `BOWIMI_SUBDOMAIN` + auth | `{"tagUuid": "abc-123", "name": "Updated"}` |
-| `delete_tag` | Delete a tag | `BOWIMI_SUBDOMAIN` + auth | `{"tagUuid": "abc-123"}` |
-| `query_tag_groups` | Tag groups list | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
-| `create_tag_group` | Create tag group | `BOWIMI_SUBDOMAIN` + auth | `{"name": "New Group"}` |
-| `update_tag_group` | Update tag group | `BOWIMI_SUBDOMAIN` + auth | `{"tagGroupUuid": "abc-123", "name": "Updated"}` |
-| `delete_tag_group` | Delete tag group | `BOWIMI_SUBDOMAIN` + auth | `{"tagGroupUuid": "abc-123"}` |
-| `query_roles` | Roles with permissions | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
-| `create_role` | Create a role | `BOWIMI_SUBDOMAIN` + auth | `{"name": "Sales Rep", "permissionKeys": ["read"]}` |
-| `update_role` | Update role | `BOWIMI_SUBDOMAIN` + auth | `{"roleUuid": "abc-123", "name": "Updated"}` |
-| `delete_role` | Delete a role | `BOWIMI_SUBDOMAIN` + auth | `{"roleUuid": "abc-123"}` |
-| `query_teams` | Teams list | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
-| `create_team` | Create a team | `BOWIMI_SUBDOMAIN` + auth | `{"name": "North Region"}` |
-| `update_team` | Update team | `BOWIMI_SUBDOMAIN` + auth | `{"teamUuid": "abc-123", "name": "Updated"}` |
-| `delete_team` | Delete a team | `BOWIMI_SUBDOMAIN` + auth | `{"teamUuid": "abc-123"}` |
-| `get_team_members` | Team members | `BOWIMI_SUBDOMAIN` + auth | `{"teamUuid": "abc-123"}` |
-| `add_team_member` | Add user to team | `BOWIMI_SUBDOMAIN` + auth | `{"teamUuid": "abc-123", "userUuid": "def-456"}` |
-| `remove_team_member` | Remove user from team | `BOWIMI_SUBDOMAIN` + auth | `{"teamUuid": "abc-123", "userUuid": "def-456"}` |
-| `query_attributes` | Custom attribute definitions | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
-| `get_entity_attributes` | Attribute values for entity | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123"}` |
-| `set_entity_attributes` | Set entity attributes | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123", "attributes": [{"attributeUuid": "a1", "data": "value"}]}` |
-| `query_entity_attributes` | Query attributes across entities | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"]}` |
-| `query_distribution_profiles` | Distribution profiles | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
-| `query_surveys` | Surveys with pagination | `BOWIMI_SUBDOMAIN` + auth | `{"limit": 100}` |
-| `update_location` | Update location properties | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123", "name": "Updated"}` |
-| `delete_location` | Delete a location | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123"}` |
-| `update_task` | Update task | `BOWIMI_SUBDOMAIN` + auth | `{"taskUuid": "abc-123", "status": "resolved"}` |
-| `delete_task` | Delete a task | `BOWIMI_SUBDOMAIN` + auth | `{"taskUuid": "abc-123"}` |
-| `query_orders` | Orders with filters | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuids": ["abc-123"], "limit": 50}` |
-| `update_order` | Update order status | `BOWIMI_SUBDOMAIN` + auth | `{"orderUuid": "abc-123", "brandStatus": "confirmed"}` |
-| `delete_order` | Delete an order | `BOWIMI_SUBDOMAIN` + auth | `{"orderUuid": "abc-123"}` |
-| `query_products` | Products with search | `BOWIMI_SUBDOMAIN` + auth | `{"searchTerm": "widget", "limit": 100}` |
-| `update_product` | Update product | `BOWIMI_SUBDOMAIN` + auth | `{"productUuid": "abc-123", "name": "Updated"}` |
-| `delete_product` | Delete a product | `BOWIMI_SUBDOMAIN` + auth | `{"productUuid": "abc-123"}` |
-| `query_product_cases` | Product cases (pack sizes) | `BOWIMI_SUBDOMAIN` + auth | `{"productUuids": ["abc-123"]}` |
-| `query_companies` | Companies with search | `BOWIMI_SUBDOMAIN` + auth | `{"searchTerm": "acme", "limit": 50}` |
-| `update_company` | Update company | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123", "name": "Updated"}` |
-| `delete_company` | Delete a company | `BOWIMI_SUBDOMAIN` + auth | `{"entityUuid": "abc-123"}` |
-| `debug_api` | Probe raw Bowimi endpoint | `BOWIMI_SUBDOMAIN` + auth | `{"method": "GET", "path": "entity-visit"}` |
-
-**Auth options:** `BOWIMI_API_KEY` (preferred) or `BOWIMI_EMAIL` + `BOWIMI_PASSWORD`
-
-## Example prompts
-
-- *"Show me my route for today"* → `get_route`, `get_route_summary`
-- *"Which stops haven't been visited in 90+ days?"* → `get_route` with `notVisitedSince`
-- *"What are the task and order counts this week?"* → `get_task_summary`, `get_order_summary`
-- *"Get the contacts for location UUID abc-123"* → `get_location_contacts`
-- *"List all products and their UUIDs"* → `list_products`, `query_products`
-- *"Show me weekly team performance"* → `get_weekly_report`, `get_team_overview`
-
-## Architecture
-
-```
-src/
-  index.js     — entry point: env config + stdio bootstrap
-  server.js    — createServer(): registers every tool module
-  tools/       — tool definitions, one module per domain
-  client.js    — Bowimi API client (HTTP methods)
-  errors.js    — API error mapping + response envelope parsing
-  auth.js      — Auth: API key or email/password session
-```
-
-See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the module map, error handling and how to add a tool.
-
-**API base:** `https://{subdomain}.bowimi.com/_api/v4.6.1/`
-
-Bowimi uses non-standard HTTP methods: `QUERY` (read with body) and `LIST` in addition to standard `GET/POST/PATCH/DELETE`.
-
-## Known limitations
-
-- **Location search** (`location/map` endpoint) returns a server error — use `get_route` to get your assigned stops, then `get_location` with specific UUIDs. Tracked in #1.
-- **Activity feed** (`activity` endpoint) returns a server error — use `get_visit_summary` and `get_insights` instead. Tracked in #1.
-- **Task listing** requires task UUIDs (no filter-based list) — use `get_task_summary` for counts.
-- **Roles** endpoint requires admin permissions — not available with field-sales API keys.
-
-## Community
-
-- **Support**: [SUPPORT.md](./SUPPORT.md) — Bug reports and getting help
-- **Code of Conduct**: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) — Contributor Covenant 2.1
-- **Contributing**: [CONTRIBUTING.md](./CONTRIBUTING.md) — Guidelines for contributors
-- **Security**: [SECURITY.md](./SECURITY.md) — Security policy and vulnerability reporting
-- **Funding**: [.github/FUNDING.yml](./.github/FUNDING.yml) — Support this project
-- **Tool Reference**: [docs/TOOLS.md](./docs/TOOLS.md) — Complete MCP tools catalog ([operator view](./docs/TOOL-CATALOG.md))
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md), [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+[MIT](LICENSE)
