@@ -54,7 +54,7 @@ export function toApiError(path, status, text) {
  * Parse a successful response body, unwrapping Bowimi's `{ Data }` envelope.
  *
  * @param {string} text Raw response body.
- * @returns {unknown} Parsed payload, raw text if not JSON, or null if empty.
+ * @returns {any} Parsed payload, raw text if not JSON, or null if empty.
  */
 export function parseSuccessBody(text) {
   if (!text) return null;

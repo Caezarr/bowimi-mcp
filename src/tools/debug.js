@@ -14,12 +14,13 @@ export function registerDebugTools(server, { client, auth }) {
       method: z.string().default("GET"),
       path: z.string(),
       body: z.string().optional(),
-      params: z.record(z.string()).optional(),
+      params: z.record(z.string(), z.string()).optional(),
     },
     async ({ method, path, body, params }) => {
       const base = `${auth.apiBase}/${client.version}`;
       const url = new URL(`${base}/${path}`);
       if (params) for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+      /** @type {{ method: string, body?: string }} */
       const opts = { method: method.toUpperCase() };
       if (body) opts.body = body;
       let res;

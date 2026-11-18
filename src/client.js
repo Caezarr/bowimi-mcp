@@ -275,7 +275,7 @@ export class BowimiClient {
 
   /**
    * Create a location.
-   * @param {{ name: string, address: string, coordinates: {lat: number, lng: number}, ... }} data
+   * @param {{ name: string, address: string, coordinates: {lat: number, lng: number}, [key: string]: unknown }} data
    */
   createLocation(data) {
     return this._post("locations", data);
@@ -324,7 +324,7 @@ export class BowimiClient {
   }
 
   /**
-   * @param {{ entityUuid, profileUuid, origin, items: [{productUuid, quantity}] }} data
+   * @param {{ entityUuid: string, profileUuid: string, origin: string, items: Array<{productUuid: string, quantity: number}>, notes?: string }} data
    */
   createOrder(data) {
     return this._post("orders", data);
