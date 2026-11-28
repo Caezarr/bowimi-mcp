@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `llms.txt`: index of the docs, protocol and code for AI assistants and LLM crawlers ([llmstxt.org](https://llmstxt.org)).
+
 ### Fixed
 - Server no longer crashes at startup with "Tool get_introductions is already registered"; the superseded listing-based variant was removed and the documented survey-based `get_introductions` kept.
 - Reported server version and update check now read the version from `package.json` (was hard-coded to 1.5.1).

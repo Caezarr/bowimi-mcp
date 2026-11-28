@@ -1,0 +1,24 @@
+# bowimi-mcp
+
+> Stateless stdio MCP server that lets Claude or any MCP host query and update the Bowimi field-sales CRM (routes, locations, contacts, orders, products, tasks, surveys, team reports) through 85 typed tools. Node.js 18+, MIT.
+
+The server maps each tool call to one or a few Bowimi API requests. `BowimiClient` hides the API's non-standard `QUERY`/`LIST` verbs and `{ Data }` envelope; every tool input is validated with zod before any HTTP call. Auth prefers a static Bearer API key (`BOWIMI_API_KEY`), with email/password session login as a fallback. `npm test` runs the real MCP server against a mocked client, offline.
+
+## Docs
+
+- [README](https://github.com/Caezarr/bowimi-mcp/blob/main/README.md): problem, install, offline try-out
+- [Architecture](https://github.com/Caezarr/bowimi-mcp/blob/main/docs/ARCHITECTURE.md): module map, error handling, how to add a tool
+- [Tool catalog](https://github.com/Caezarr/bowimi-mcp/blob/main/docs/TOOL-CATALOG.md): every tool with its purpose
+- [Tools reference](https://github.com/Caezarr/bowimi-mcp/blob/main/docs/TOOLS.md): inputs and outputs
+- [Changelog](https://github.com/Caezarr/bowimi-mcp/blob/main/CHANGELOG.md)
+
+## Code
+
+- [src/server.js](https://github.com/Caezarr/bowimi-mcp/blob/main/src/server.js): `createServer(client)`, registers every tool
+- [src/tools/](https://github.com/Caezarr/bowimi-mcp/tree/main/src/tools): one module per CRM domain (route, locations, orders, products, tasks, surveys, analytics, ...)
+- [.env.example](https://github.com/Caezarr/bowimi-mcp/blob/main/.env.example): required environment variables
+
+## Optional
+
+- [Contributing](https://github.com/Caezarr/bowimi-mcp/blob/main/CONTRIBUTING.md)
+- [Security policy](https://github.com/Caezarr/bowimi-mcp/blob/main/SECURITY.md)
